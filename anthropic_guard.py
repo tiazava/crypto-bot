@@ -1,4 +1,6 @@
 import json
+import re
+
 import anthropic
 import config
 
@@ -8,7 +10,6 @@ class AnthropicGuard:
     def __init__(self):
 
         if not config.ANTHROPIC_API_KEY:
-
             raise RuntimeError(
                 "ANTHROPIC_API_KEY mancante"
             )
@@ -17,43 +18,93 @@ class AnthropicGuard:
             api_key=config.ANTHROPIC_API_KEY
         )
 
+    # ========================================================
+    # ESTRAZIONE JSON
+    # ========================================================
 
-    def evaluate_news_impact(
+    @staticmethod
+    def _extract_json(text):
+
+        text = text.strip()
+
+        # Rimuove eventuali ```json ... ```
+        text = re.sub(
+            r"^```(?:json)?\s*",
+            "",
+            text,
+            flags=re.IGNORECASE
+        )
+
+        text = re.sub(
+            r"\s*```$",
+            "",
+            text
+        )
+
+        return json.loads(text)
+
+    # ========================================================
+    # AI RISK GUARD
+    # ========================================================
+
+    def evaluate_market_risk(
         self,
         asset,
         side,
-        current_price
+        current_price,
+        technical_data=None
     ):
 
+        technical_data = technical_data or {}
+
         prompt = f"""
-Sei un Risk Analyst per un bot quantitativo.
+Sei il modulo di controllo rischio di un trading bot
+automatico.
 
-Asset: {asset}
-Segnale tecnico: {side}
-Prezzo: {current_price} EUR
+NON devi generare segnali di trading.
 
-Valuta se il contesto di mercato/news presenta
-un rischio evidente contrario al segnale.
+La strategia quantitativa ha già generato questo segnale:
 
-Rispondi ESCLUSIVAMENTE JSON:
+ASSET: {asset}
+DIREZIONE: {side}
+PREZZO: {current_price} EUR
+
+DATI TECNICI:
+{json.dumps(technical_data, indent=2)}
+
+Il tuo unico compito è verificare se esistono elementi
+evidenti nei dati forniti che rendono il segnale
+particolarmente rischioso o incoerente.
+
+Non inventare news, prezzi, indicatori o eventi che non
+sono presenti nei dati forniti.
+
+Rispondi ESCLUSIVAMENTE con JSON valido:
 
 {{
-    "decision": "BLOCK" | "GO" | "BOOST_GO",
-    "news_summary": "massimo una frase",
-    "reason": "massimo due frasi"
+    "decision": "BLOCK" oppure "GO",
+    "reason": "breve motivazione"
 }}
+
+Regole:
+
+BLOCK:
+- dati incoerenti;
+- rischio anomalo evidente;
+- informazioni insufficienti per effettuare il controllo.
+
+GO:
+- non rilevi anomalie evidenti nei dati forniti.
+
+Non modificare entry, stop loss, take profit o size.
 """
 
         try:
 
             response = self.client.messages.create(
-
                 model=config.ANTHROPIC_MODEL,
-
-                max_tokens=250,
-
+                max_tokens=200,
                 temperature=0,
-
                 messages=[
                     {
                         "role": "user",
@@ -62,45 +113,60 @@ Rispondi ESCLUSIVAMENTE JSON:
                 ]
             )
 
-            text = response.content[0].text.strip()
+            if not response.content:
+                raise RuntimeError(
+                    "Risposta Anthropic vuota"
+                )
 
-            data = json.loads(text)
+            text = response.content[0].text
 
-            decision = data.get(
-                "decision",
-                "BLOCK"
+            result = self._extract_json(text)
+
+            decision = (
+                str(
+                    result.get(
+                        "decision",
+                        "BLOCK"
+                    )
+                )
+                .upper()
+                .strip()
             )
 
-            if decision not in [
-                "BLOCK",
-                "GO",
-                "BOOST_GO"
-            ]:
-
-                decision = "BLOCK"
-
-            return (
-                decision,
-                data.get(
-                    "news_summary",
-                    ""
-                ),
-                data.get(
+            reason = str(
+                result.get(
                     "reason",
-                    ""
+                    "Nessuna motivazione"
                 )
             )
+
+            if decision not in (
+                "GO",
+                "BLOCK"
+            ):
+                decision = "BLOCK"
+                reason = (
+                    "Decisione Anthropic non valida"
+                )
+
+            return {
+                "decision": decision,
+                "reason": reason
+            }
 
         except Exception as e:
 
             print(
-                f"❌ Anthropic error: {e}"
+                f"ERRORE ANTHROPIC: {e}"
             )
 
-            # FAIL SAFE:
-            # se AI non funziona NON TRADIAMO
-            return (
-                "BLOCK",
-                "AI non disponibile",
-                "Trade bloccato per sicurezza"
-            )
+            # FAIL CLOSED:
+            # se Anthropic non funziona,
+            # non apriamo nessun trade.
+            return {
+                "decision": "BLOCK",
+                "reason": (
+                    "Anthropic non disponibile. "
+                    "Trade bloccato per sicurezza."
+                )
+            }
