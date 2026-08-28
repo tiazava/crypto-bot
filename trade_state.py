@@ -3,9 +3,15 @@ from datetime import datetime, timezone
 from google.cloud import firestore
 
 
-COLLECTION_NAME = "trade_state"
+# ============================================================
+# FIRESTORE
+# ============================================================
+
+TRADE_COLLECTION_NAME = "trade_state"
 ACTIVE_TRADE_DOCUMENT_ID = "active_trade"
 RISK_DOCUMENT_ID = "risk_state"
+
+SIGNAL_COLLECTION_NAME = "signal_state"
 
 
 class TradeState:
@@ -30,15 +36,29 @@ class TradeState:
     def _trade_ref(self):
         return (
             self.db
-            .collection(COLLECTION_NAME)
+            .collection(TRADE_COLLECTION_NAME)
             .document(ACTIVE_TRADE_DOCUMENT_ID)
         )
 
     def _risk_ref(self):
         return (
             self.db
-            .collection(COLLECTION_NAME)
+            .collection(TRADE_COLLECTION_NAME)
             .document(RISK_DOCUMENT_ID)
+        )
+
+    def _signal_ref(
+        self,
+        symbol
+    ):
+        symbol = str(
+            symbol
+        ).upper().strip()
+
+        return (
+            self.db
+            .collection(SIGNAL_COLLECTION_NAME)
+            .document(symbol)
         )
 
     # ========================================================
@@ -77,7 +97,10 @@ class TradeState:
             "EXIT_PENDING",
         }
 
-        if trade.get("status") not in active_statuses:
+        if (
+            trade.get("status")
+            not in active_statuses
+        ):
             return None
 
         return trade
@@ -103,55 +126,90 @@ class TradeState:
         now = self._now()
 
         data = {
-            "status": "ENTRY_PENDING",
-            "symbol": symbol,
-            "pair": pair,
-            "side": side.upper(),
+            "status":
+                "ENTRY_PENDING",
 
-            "requested_entry_price": float(
-                requested_entry_price
-            ),
+            "symbol":
+                symbol,
 
-            "requested_volume": float(
-                requested_volume
-            ),
+            "pair":
+                pair,
 
-            "stop_loss": float(
-                stop_loss
-            ),
+            "side":
+                side.upper(),
 
-            "take_profit": float(
-                take_profit
-            ),
+            "requested_entry_price":
+                float(
+                    requested_entry_price
+                ),
 
-            "leverage": float(
-                leverage
-            ),
+            "requested_volume":
+                float(
+                    requested_volume
+                ),
+
+            "stop_loss":
+                float(
+                    stop_loss
+                ),
+
+            "take_profit":
+                float(
+                    take_profit
+                ),
+
+            "leverage":
+                float(
+                    leverage
+                ),
 
             "entry_client_order_id":
                 entry_client_order_id,
 
-            "entry_txid": None,
-            "entry_fill_price": None,
-            "entry_filled_volume": None,
+            "entry_txid":
+                None,
 
-            "stop_client_order_id": None,
-            "stop_txid": None,
+            "entry_fill_price":
+                None,
 
-            "take_profit_client_order_id": None,
-            "take_profit_txid": None,
+            "entry_filled_volume":
+                None,
 
-            "signal_candle": signal_candle,
+            "stop_client_order_id":
+                None,
 
-            "close_reason": None,
-            "exit_price": None,
-            "pnl_eur": None,
+            "stop_txid":
+                None,
 
-            "telegram_open_sent": False,
-            "telegram_close_sent": False,
+            "take_profit_client_order_id":
+                None,
 
-            "created_at": now,
-            "updated_at": now,
+            "take_profit_txid":
+                None,
+
+            "signal_candle":
+                signal_candle,
+
+            "close_reason":
+                None,
+
+            "exit_price":
+                None,
+
+            "pnl_eur":
+                None,
+
+            "telegram_open_sent":
+                False,
+
+            "telegram_close_sent":
+                False,
+
+            "created_at":
+                now,
+
+            "updated_at":
+                now,
         }
 
         self._trade_ref().set(
@@ -171,11 +229,15 @@ class TradeState:
     ):
 
         update = {
-            "entry_txid": txid,
-            "updated_at": self._now(),
+            "entry_txid":
+                txid,
+
+            "updated_at":
+                self._now(),
         }
 
         if client_order_id:
+
             update[
                 "entry_client_order_id"
             ] = client_order_id
@@ -192,13 +254,18 @@ class TradeState:
 
         self._trade_ref().update(
             {
-                "status": "ENTRY_FILLED",
+                "status":
+                    "ENTRY_FILLED",
 
                 "entry_fill_price":
-                    float(fill_price),
+                    float(
+                        fill_price
+                    ),
 
                 "entry_filled_volume":
-                    float(filled_volume),
+                    float(
+                        filled_volume
+                    ),
 
                 "updated_at":
                     self._now(),
@@ -209,7 +276,9 @@ class TradeState:
     # PROTEZIONI
     # ========================================================
 
-    def mark_protection_pending(self):
+    def mark_protection_pending(
+        self
+    ):
 
         self._trade_ref().update(
             {
@@ -228,11 +297,15 @@ class TradeState:
     ):
 
         update = {
-            "stop_txid": txid,
-            "updated_at": self._now(),
+            "stop_txid":
+                txid,
+
+            "updated_at":
+                self._now(),
         }
 
         if client_order_id:
+
             update[
                 "stop_client_order_id"
             ] = client_order_id
@@ -248,11 +321,15 @@ class TradeState:
     ):
 
         update = {
-            "take_profit_txid": txid,
-            "updated_at": self._now(),
+            "take_profit_txid":
+                txid,
+
+            "updated_at":
+                self._now(),
         }
 
         if client_order_id:
+
             update[
                 "take_profit_client_order_id"
             ] = client_order_id
@@ -261,16 +338,22 @@ class TradeState:
             update
         )
 
-    def mark_protected(self):
+    def mark_protected(
+        self
+    ):
 
         trade = self.get_trade()
 
         if not trade:
+
             raise RuntimeError(
                 "Nessun trade Firestore presente"
             )
 
-        if not trade.get("stop_txid"):
+        if not trade.get(
+            "stop_txid"
+        ):
+
             raise RuntimeError(
                 "Stop Loss non presente"
             )
@@ -278,6 +361,7 @@ class TradeState:
         if not trade.get(
             "take_profit_txid"
         ):
+
             raise RuntimeError(
                 "Take Profit non presente"
             )
@@ -329,39 +413,57 @@ class TradeState:
         now = self._now()
 
         update = {
-            "status": "CLOSED",
-            "close_reason": close_reason,
-            "closed_at": now,
-            "updated_at": now,
+            "status":
+                "CLOSED",
+
+            "close_reason":
+                close_reason,
+
+            "closed_at":
+                now,
+
+            "updated_at":
+                now,
         }
 
         if exit_price is not None:
+
             update[
                 "exit_price"
-            ] = float(exit_price)
+            ] = float(
+                exit_price
+            )
 
         if pnl_eur is not None:
+
             update[
                 "pnl_eur"
-            ] = float(pnl_eur)
+            ] = float(
+                pnl_eur
+            )
 
         self._trade_ref().update(
             update
         )
 
         # Aggiorna automaticamente
-        # i limiti di rischio quando
-        # conosciamo il P&L reale.
+        # il risk state con il risultato
+        # del trade.
         if pnl_eur is not None:
+
             self.record_trade_result(
-                float(pnl_eur)
+                float(
+                    pnl_eur
+                )
             )
 
     # ========================================================
     # TELEGRAM
     # ========================================================
 
-    def mark_telegram_open_sent(self):
+    def mark_telegram_open_sent(
+        self
+    ):
 
         self._trade_ref().update(
             {
@@ -373,7 +475,9 @@ class TradeState:
             }
         )
 
-    def mark_telegram_close_sent(self):
+    def mark_telegram_close_sent(
+        self
+    ):
 
         self._trade_ref().update(
             {
@@ -400,7 +504,9 @@ class TradeState:
                     "ERROR",
 
                 "error_message":
-                    str(message),
+                    str(
+                        message
+                    ),
 
                 "updated_at":
                     self._now(),
@@ -408,10 +514,12 @@ class TradeState:
         )
 
     # ========================================================
-    # CANCELLAZIONE STATO TRADE
+    # CANCELLAZIONE TRADE
     # ========================================================
 
-    def clear_trade(self):
+    def clear_trade(
+        self
+    ):
 
         self._trade_ref().delete()
 
@@ -419,20 +527,35 @@ class TradeState:
     # RISK STATE
     # ========================================================
 
-    def _default_risk_state(self):
+    def _default_risk_state(
+        self
+    ):
 
         now = self._now()
 
         return {
-            "date": self._today(),
-            "daily_pnl_eur": 0.0,
-            "consecutive_losses": 0,
-            "trading_blocked": False,
-            "block_reason": None,
-            "updated_at": now,
+            "date":
+                self._today(),
+
+            "daily_pnl_eur":
+                0.0,
+
+            "consecutive_losses":
+                0,
+
+            "trading_blocked":
+                False,
+
+            "block_reason":
+                None,
+
+            "updated_at":
+                now,
         }
 
-    def get_risk_state(self):
+    def get_risk_state(
+        self
+    ):
 
         snapshot = (
             self._risk_ref()
@@ -451,7 +574,9 @@ class TradeState:
 
             return data
 
-        data = snapshot.to_dict()
+        data = (
+            snapshot.to_dict()
+        )
 
         if not data:
 
@@ -465,10 +590,14 @@ class TradeState:
 
             return data
 
-        # Se è iniziato un nuovo giorno,
-        # resettiamo solo il P&L giornaliero
-        # e l'eventuale blocco giornaliero.
-        if data.get("date") != self._today():
+        # ====================================================
+        # NUOVO GIORNO
+        # ====================================================
+
+        if (
+            data.get("date")
+            != self._today()
+        ):
 
             consecutive_losses = int(
                 data.get(
@@ -512,7 +641,9 @@ class TradeState:
         pnl_eur
     ):
 
-        risk = self.get_risk_state()
+        risk = (
+            self.get_risk_state()
+        )
 
         pnl_eur = float(
             pnl_eur
@@ -567,7 +698,7 @@ class TradeState:
         }
 
     # ========================================================
-    # BLOCCO MANUALE/AUTOMATICO
+    # BLOCCO TRADING
     # ========================================================
 
     def block_trading(
@@ -581,7 +712,9 @@ class TradeState:
                     True,
 
                 "block_reason":
-                    str(reason),
+                    str(
+                        reason
+                    ),
 
                 "updated_at":
                     self._now(),
@@ -589,7 +722,9 @@ class TradeState:
             merge=True
         )
 
-    def unblock_trading(self):
+    def unblock_trading(
+        self
+    ):
 
         self._risk_ref().set(
             {
@@ -604,3 +739,235 @@ class TradeState:
             },
             merge=True
         )
+
+    # ========================================================
+    # IDEMPOTENZA CANDELA M15
+    # ========================================================
+
+    def get_signal_state(
+        self,
+        symbol
+    ):
+
+        snapshot = (
+            self._signal_ref(
+                symbol
+            ).get()
+        )
+
+        if not snapshot.exists:
+            return None
+
+        data = (
+            snapshot.to_dict()
+        )
+
+        if not data:
+            return None
+
+        return data
+
+    def get_last_processed_candle(
+        self,
+        symbol
+    ):
+
+        data = (
+            self.get_signal_state(
+                symbol
+            )
+        )
+
+        if not data:
+            return None
+
+        return data.get(
+            "last_processed_candle"
+        )
+
+    def is_candle_processed(
+        self,
+        symbol,
+        candle_id
+    ):
+
+        if candle_id is None:
+            return False
+
+        last_candle = (
+            self.get_last_processed_candle(
+                symbol
+            )
+        )
+
+        return (
+            str(last_candle)
+            == str(candle_id)
+        )
+
+    # ========================================================
+    # CLAIM ATOMICO DELLA CANDELA
+    # ========================================================
+
+    def claim_signal_candle(
+        self,
+        symbol,
+        candle_id,
+        action=None,
+    ):
+        """
+        Tenta di registrare una candela come processata.
+
+        Ritorna:
+            True  -> questa esecuzione ha ottenuto la candela
+            False -> la candela era già stata processata
+
+        La transazione Firestore impedisce che due Cloud Run
+        simultanei possano processare la stessa candela M15.
+        """
+
+        if candle_id is None:
+
+            raise ValueError(
+                "candle_id non può essere None"
+            )
+
+        symbol = str(
+            symbol
+        ).upper().strip()
+
+        candle_id = str(
+            candle_id
+        )
+
+        document_ref = (
+            self._signal_ref(
+                symbol
+            )
+        )
+
+        transaction = (
+            self.db.transaction()
+        )
+
+        @firestore.transactional
+        def claim(
+            transaction
+        ):
+
+            snapshot = (
+                document_ref.get(
+                    transaction=transaction
+                )
+            )
+
+            if snapshot.exists:
+
+                current = (
+                    snapshot.to_dict()
+                    or {}
+                )
+
+                last_candle = (
+                    current.get(
+                        "last_processed_candle"
+                    )
+                )
+
+                if (
+                    str(last_candle)
+                    == candle_id
+                ):
+
+                    return False
+
+            data = {
+                "symbol":
+                    symbol,
+
+                "last_processed_candle":
+                    candle_id,
+
+                "last_action":
+                    action,
+
+                "processed_at":
+                    self._now(),
+
+                "updated_at":
+                    self._now(),
+            }
+
+            transaction.set(
+                document_ref,
+                data,
+                merge=True
+            )
+
+            return True
+
+        return claim(
+            transaction
+        )
+
+    # ========================================================
+    # AGGIORNA RISULTATO ANALISI CANDELA
+    # ========================================================
+
+    def update_signal_result(
+        self,
+        symbol,
+        candle_id,
+        action,
+        reason=None,
+    ):
+
+        data = {
+            "last_processed_candle":
+                str(
+                    candle_id
+                ),
+
+            "last_action":
+                action,
+
+            "last_reason":
+                reason,
+
+            "updated_at":
+                self._now(),
+        }
+
+        self._signal_ref(
+            symbol
+        ).set(
+            data,
+            merge=True
+        )
+
+    # ========================================================
+    # RESET IDEMPOTENZA
+    # Solo per test/manutenzione
+    # ========================================================
+
+    def clear_signal_state(
+        self,
+        symbol=None
+    ):
+
+        if symbol is not None:
+
+            self._signal_ref(
+                symbol
+            ).delete()
+
+            return
+
+        for symbol_name in (
+            "BTC",
+            "ETH",
+        ):
+
+            self._signal_ref(
+                symbol_name
+            ).delete()
