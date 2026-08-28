@@ -4,7 +4,8 @@ from google.cloud import firestore
 
 
 COLLECTION_NAME = "trade_state"
-DOCUMENT_ID = "active_trade"
+ACTIVE_TRADE_DOCUMENT_ID = "active_trade"
+RISK_DOCUMENT_ID = "risk_state"
 
 
 class TradeState:
@@ -12,26 +13,42 @@ class TradeState:
     def __init__(self):
         self.db = firestore.Client()
 
-    def _doc_ref(self):
-        return (
-            self.db
-            .collection(COLLECTION_NAME)
-            .document(DOCUMENT_ID)
-        )
+    # ========================================================
+    # UTILITÀ
+    # ========================================================
 
     def _now(self):
         return datetime.now(
             timezone.utc
         ).isoformat()
 
+    def _today(self):
+        return datetime.now(
+            timezone.utc
+        ).date().isoformat()
+
+    def _trade_ref(self):
+        return (
+            self.db
+            .collection(COLLECTION_NAME)
+            .document(ACTIVE_TRADE_DOCUMENT_ID)
+        )
+
+    def _risk_ref(self):
+        return (
+            self.db
+            .collection(COLLECTION_NAME)
+            .document(RISK_DOCUMENT_ID)
+        )
+
     # ========================================================
-    # LETTURA STATO
+    # LETTURA TRADE
     # ========================================================
 
     def get_trade(self):
 
         snapshot = (
-            self._doc_ref()
+            self._trade_ref()
             .get()
         )
 
@@ -44,10 +61,6 @@ class TradeState:
             return None
 
         return data
-
-    # ========================================================
-    # TRADE ATTIVO
-    # ========================================================
 
     def get_active_trade(self):
 
@@ -128,8 +141,7 @@ class TradeState:
             "take_profit_client_order_id": None,
             "take_profit_txid": None,
 
-            "signal_candle":
-                signal_candle,
+            "signal_candle": signal_candle,
 
             "close_reason": None,
             "exit_price": None,
@@ -142,14 +154,14 @@ class TradeState:
             "updated_at": now,
         }
 
-        self._doc_ref().set(
+        self._trade_ref().set(
             data
         )
 
         return data
 
     # ========================================================
-    # ENTRY INVIATA
+    # ENTRY
     # ========================================================
 
     def set_entry_order(
@@ -168,13 +180,9 @@ class TradeState:
                 "entry_client_order_id"
             ] = client_order_id
 
-        self._doc_ref().update(
+        self._trade_ref().update(
             update
         )
-
-    # ========================================================
-    # ENTRY ESEGUITA
-    # ========================================================
 
     def mark_entry_filled(
         self,
@@ -182,7 +190,7 @@ class TradeState:
         filled_volume
     ):
 
-        self._doc_ref().update(
+        self._trade_ref().update(
             {
                 "status": "ENTRY_FILLED",
 
@@ -198,12 +206,12 @@ class TradeState:
         )
 
     # ========================================================
-    # PROTEZIONI IN PREPARAZIONE
+    # PROTEZIONI
     # ========================================================
 
     def mark_protection_pending(self):
 
-        self._doc_ref().update(
+        self._trade_ref().update(
             {
                 "status":
                     "PROTECTION_PENDING",
@@ -212,10 +220,6 @@ class TradeState:
                     self._now(),
             }
         )
-
-    # ========================================================
-    # STOP LOSS
-    # ========================================================
 
     def set_stop_order(
         self,
@@ -233,13 +237,9 @@ class TradeState:
                 "stop_client_order_id"
             ] = client_order_id
 
-        self._doc_ref().update(
+        self._trade_ref().update(
             update
         )
-
-    # ========================================================
-    # TAKE PROFIT
-    # ========================================================
 
     def set_take_profit_order(
         self,
@@ -257,13 +257,9 @@ class TradeState:
                 "take_profit_client_order_id"
             ] = client_order_id
 
-        self._doc_ref().update(
+        self._trade_ref().update(
             update
         )
-
-    # ========================================================
-    # TRADE PROTETTO
-    # ========================================================
 
     def mark_protected(self):
 
@@ -286,21 +282,23 @@ class TradeState:
                 "Take Profit non presente"
             )
 
-        self._doc_ref().update(
+        now = self._now()
+
+        self._trade_ref().update(
             {
                 "status":
                     "PROTECTED",
 
                 "protected_at":
-                    self._now(),
+                    now,
 
                 "updated_at":
-                    self._now(),
+                    now,
             }
         )
 
     # ========================================================
-    # USCITA IN CORSO
+    # USCITA
     # ========================================================
 
     def mark_exit_pending(
@@ -308,7 +306,7 @@ class TradeState:
         close_reason
     ):
 
-        self._doc_ref().update(
+        self._trade_ref().update(
             {
                 "status":
                     "EXIT_PENDING",
@@ -321,10 +319,6 @@ class TradeState:
             }
         )
 
-    # ========================================================
-    # CHIUSURA TRADE
-    # ========================================================
-
     def close_trade(
         self,
         close_reason,
@@ -336,14 +330,9 @@ class TradeState:
 
         update = {
             "status": "CLOSED",
-            "close_reason":
-                close_reason,
-
-            "closed_at":
-                now,
-
-            "updated_at":
-                now,
+            "close_reason": close_reason,
+            "closed_at": now,
+            "updated_at": now,
         }
 
         if exit_price is not None:
@@ -356,9 +345,17 @@ class TradeState:
                 "pnl_eur"
             ] = float(pnl_eur)
 
-        self._doc_ref().update(
+        self._trade_ref().update(
             update
         )
+
+        # Aggiorna automaticamente
+        # i limiti di rischio quando
+        # conosciamo il P&L reale.
+        if pnl_eur is not None:
+            self.record_trade_result(
+                float(pnl_eur)
+            )
 
     # ========================================================
     # TELEGRAM
@@ -366,7 +363,7 @@ class TradeState:
 
     def mark_telegram_open_sent(self):
 
-        self._doc_ref().update(
+        self._trade_ref().update(
             {
                 "telegram_open_sent":
                     True,
@@ -378,7 +375,7 @@ class TradeState:
 
     def mark_telegram_close_sent(self):
 
-        self._doc_ref().update(
+        self._trade_ref().update(
             {
                 "telegram_close_sent":
                     True,
@@ -389,7 +386,7 @@ class TradeState:
         )
 
     # ========================================================
-    # ERRORE
+    # ERRORI
     # ========================================================
 
     def mark_error(
@@ -397,7 +394,7 @@ class TradeState:
         message
     ):
 
-        self._doc_ref().update(
+        self._trade_ref().update(
             {
                 "status":
                     "ERROR",
@@ -411,9 +408,199 @@ class TradeState:
         )
 
     # ========================================================
-    # CANCELLAZIONE STATO
+    # CANCELLAZIONE STATO TRADE
     # ========================================================
 
     def clear_trade(self):
 
-        self._doc_ref().delete()
+        self._trade_ref().delete()
+
+    # ========================================================
+    # RISK STATE
+    # ========================================================
+
+    def _default_risk_state(self):
+
+        now = self._now()
+
+        return {
+            "date": self._today(),
+            "daily_pnl_eur": 0.0,
+            "consecutive_losses": 0,
+            "trading_blocked": False,
+            "block_reason": None,
+            "updated_at": now,
+        }
+
+    def get_risk_state(self):
+
+        snapshot = (
+            self._risk_ref()
+            .get()
+        )
+
+        if not snapshot.exists:
+
+            data = (
+                self._default_risk_state()
+            )
+
+            self._risk_ref().set(
+                data
+            )
+
+            return data
+
+        data = snapshot.to_dict()
+
+        if not data:
+
+            data = (
+                self._default_risk_state()
+            )
+
+            self._risk_ref().set(
+                data
+            )
+
+            return data
+
+        # Se è iniziato un nuovo giorno,
+        # resettiamo solo il P&L giornaliero
+        # e l'eventuale blocco giornaliero.
+        if data.get("date") != self._today():
+
+            consecutive_losses = int(
+                data.get(
+                    "consecutive_losses",
+                    0
+                )
+            )
+
+            data = {
+                "date":
+                    self._today(),
+
+                "daily_pnl_eur":
+                    0.0,
+
+                "consecutive_losses":
+                    consecutive_losses,
+
+                "trading_blocked":
+                    False,
+
+                "block_reason":
+                    None,
+
+                "updated_at":
+                    self._now(),
+            }
+
+            self._risk_ref().set(
+                data
+            )
+
+        return data
+
+    # ========================================================
+    # REGISTRA RISULTATO TRADE
+    # ========================================================
+
+    def record_trade_result(
+        self,
+        pnl_eur
+    ):
+
+        risk = self.get_risk_state()
+
+        pnl_eur = float(
+            pnl_eur
+        )
+
+        daily_pnl = float(
+            risk.get(
+                "daily_pnl_eur",
+                0.0
+            )
+        )
+
+        daily_pnl += pnl_eur
+
+        consecutive_losses = int(
+            risk.get(
+                "consecutive_losses",
+                0
+            )
+        )
+
+        if pnl_eur < 0:
+
+            consecutive_losses += 1
+
+        else:
+
+            consecutive_losses = 0
+
+        update = {
+            "date":
+                self._today(),
+
+            "daily_pnl_eur":
+                daily_pnl,
+
+            "consecutive_losses":
+                consecutive_losses,
+
+            "updated_at":
+                self._now(),
+        }
+
+        self._risk_ref().set(
+            update,
+            merge=True
+        )
+
+        return {
+            **risk,
+            **update,
+        }
+
+    # ========================================================
+    # BLOCCO MANUALE/AUTOMATICO
+    # ========================================================
+
+    def block_trading(
+        self,
+        reason
+    ):
+
+        self._risk_ref().set(
+            {
+                "trading_blocked":
+                    True,
+
+                "block_reason":
+                    str(reason),
+
+                "updated_at":
+                    self._now(),
+            },
+            merge=True
+        )
+
+    def unblock_trading(self):
+
+        self._risk_ref().set(
+            {
+                "trading_blocked":
+                    False,
+
+                "block_reason":
+                    None,
+
+                "updated_at":
+                    self._now(),
+            },
+            merge=True
+        )
