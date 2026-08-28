@@ -103,6 +103,9 @@ def calculate_position_size(
 
 def extract_txid(result):
 
+    if not result:
+        return None
+
     txids = result.get(
         "txid",
         []
@@ -131,14 +134,17 @@ def order_is_filled(order):
     ).lower()
 
     try:
+
         vol_exec = float(
             order.get(
                 "vol_exec",
                 0
             )
         )
+
     except Exception:
-        vol_exec = 0
+
+        vol_exec = 0.0
 
     return (
         status == "closed"
@@ -152,6 +158,7 @@ def get_fill_price(
 ):
 
     try:
+
         price = float(
             order.get(
                 "price",
@@ -176,6 +183,7 @@ def get_filled_volume(
 ):
 
     try:
+
         volume = float(
             order.get(
                 "vol_exec",
@@ -192,6 +200,44 @@ def get_filled_volume(
     return float(
         fallback
     )
+
+
+# ============================================================
+# IDENTIFICATIVO CANDELA M15
+# ============================================================
+
+def get_candle_id(df):
+
+    if df is None or df.empty:
+        return None
+
+    try:
+
+        value = (
+            df.iloc[-1]["time"]
+        )
+
+        if hasattr(
+            value,
+            "isoformat"
+        ):
+            return value.isoformat()
+
+        return str(
+            value
+        )
+
+    except Exception:
+
+        try:
+
+            return str(
+                df.index[-1]
+            )
+
+        except Exception:
+
+            return None
 
 
 # ============================================================
@@ -261,7 +307,9 @@ def check_risk_limits(
     operating_capital,
 ):
 
-    risk = state.get_risk_state()
+    risk = (
+        state.get_risk_state()
+    )
 
     daily_pnl = float(
         risk.get(
@@ -293,7 +341,9 @@ def check_risk_limits(
         * config.MAX_DAILY_LOSS
     )
 
-    print("\nRISK CONTROL")
+    print(
+        "\nRISK CONTROL"
+    )
 
     print(
         f"P&L giornaliero: "
@@ -311,9 +361,9 @@ def check_risk_limits(
         f"{config.MAX_CONSECUTIVE_LOSSES}"
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # PERDITA GIORNALIERA
-    # --------------------------------------------------------
+    # ========================================================
 
     if daily_pnl <= -max_daily_loss_eur:
 
@@ -344,9 +394,9 @@ def check_risk_limits(
 
         return False
 
-    # --------------------------------------------------------
+    # ========================================================
     # PERDITE CONSECUTIVE
-    # --------------------------------------------------------
+    # ========================================================
 
     if (
         consecutive_losses
@@ -377,9 +427,9 @@ def check_risk_limits(
 
         return False
 
-    # --------------------------------------------------------
-    # BLOCCO PREESISTENTE
-    # --------------------------------------------------------
+    # ========================================================
+    # BLOCCO GIÀ PRESENTE
+    # ========================================================
 
     if already_blocked:
 
@@ -421,18 +471,22 @@ def monitor_active_trade(
         f"{trade.get('status')}"
     )
 
-    status = trade.get(
-        "status"
+    status = (
+        trade.get(
+            "status"
+        )
     )
 
-    # --------------------------------------------------------
-    # ENTRY NON ANCORA CONFERMATA
-    # --------------------------------------------------------
+    # ========================================================
+    # ENTRY PENDING
+    # ========================================================
 
     if status == "ENTRY_PENDING":
 
-        entry_txid = trade.get(
-            "entry_txid"
+        entry_txid = (
+            trade.get(
+                "entry_txid"
+            )
         )
 
         if not entry_txid:
@@ -478,62 +532,84 @@ def monitor_active_trade(
         )
 
         state.mark_entry_filled(
-            fill_price=fill_price,
-            filled_volume=filled_volume,
+            fill_price=
+            fill_price,
+
+            filled_volume=
+            filled_volume,
         )
 
         trade = (
             state.get_active_trade()
         )
 
-        status = "ENTRY_FILLED"
+        status = (
+            "ENTRY_FILLED"
+        )
 
-    # --------------------------------------------------------
-    # ENTRY ESEGUITA MA NON PROTETTA
-    # --------------------------------------------------------
+    # ========================================================
+    # CREA PROTEZIONI
+    # ========================================================
 
     if status in {
         "ENTRY_FILLED",
         "PROTECTION_PENDING",
     }:
 
-        pair = trade["pair"]
-        side = trade["side"]
+        pair = (
+            trade["pair"]
+        )
 
-        volume = trade.get(
-            "entry_filled_volume"
+        side = (
+            trade["side"]
+        )
+
+        volume = (
+            trade.get(
+                "entry_filled_volume"
+            )
         )
 
         if not volume:
-            volume = trade[
-                "requested_volume"
-            ]
 
-        leverage = trade[
-            "leverage"
-        ]
+            volume = (
+                trade[
+                    "requested_volume"
+                ]
+            )
 
-        stop_loss = trade[
-            "stop_loss"
-        ]
+        leverage = (
+            trade["leverage"]
+        )
 
-        take_profit = trade[
-            "take_profit"
-        ]
+        stop_loss = (
+            trade["stop_loss"]
+        )
+
+        take_profit = (
+            trade["take_profit"]
+        )
 
         state.mark_protection_pending()
 
-        stop_txid = trade.get(
-            "stop_txid"
+        stop_txid = (
+            trade.get(
+                "stop_txid"
+            )
         )
 
-        tp_txid = trade.get(
-            "take_profit_txid"
+        tp_txid = (
+            trade.get(
+                "take_profit_txid"
+            )
         )
 
         try:
 
+            # =================================================
             # STOP LOSS
+            # =================================================
+
             if not stop_txid:
 
                 stop_result = (
@@ -541,18 +617,23 @@ def monitor_active_trade(
                         pair=pair,
                         entry_side=side,
                         volume=volume,
-                        stop_price=stop_loss,
-                        leverage=leverage,
+                        stop_price=
+                        stop_loss,
+                        leverage=
+                        leverage,
                         validate=False,
                         reduce_only=True,
                     )
                 )
 
-                stop_txid = extract_txid(
-                    stop_result
+                stop_txid = (
+                    extract_txid(
+                        stop_result
+                    )
                 )
 
                 if not stop_txid:
+
                     raise RuntimeError(
                         "Kraken non ha restituito "
                         "TXID Stop Loss"
@@ -562,7 +643,10 @@ def monitor_active_trade(
                     stop_txid
                 )
 
+            # =================================================
             # TAKE PROFIT
+            # =================================================
+
             if not tp_txid:
 
                 tp_result = (
@@ -572,17 +656,21 @@ def monitor_active_trade(
                         volume=volume,
                         take_profit_price=
                         take_profit,
-                        leverage=leverage,
+                        leverage=
+                        leverage,
                         validate=False,
                         reduce_only=True,
                     )
                 )
 
-                tp_txid = extract_txid(
-                    tp_result
+                tp_txid = (
+                    extract_txid(
+                        tp_result
+                    )
                 )
 
                 if not tp_txid:
+
                     raise RuntimeError(
                         "Kraken non ha restituito "
                         "TXID Take Profit"
@@ -603,6 +691,10 @@ def monitor_active_trade(
                 "con SL + TP."
             )
 
+            # =================================================
+            # TELEGRAM APERTURA
+            # =================================================
+
             if not trade.get(
                 "telegram_open_sent"
             ):
@@ -611,38 +703,66 @@ def monitor_active_trade(
                     trade.get(
                         "entry_fill_price"
                     )
-                    or trade[
+                    or
+                    trade[
                         "requested_entry_price"
                     ]
                 )
 
                 notional = (
-                    float(volume)
-                    * float(entry_price)
+                    float(
+                        volume
+                    )
+                    * float(
+                        entry_price
+                    )
                 )
 
                 risk = (
                     abs(
-                        float(entry_price)
-                        - float(stop_loss)
+                        float(
+                            entry_price
+                        )
+                        -
+                        float(
+                            stop_loss
+                        )
                     )
-                    * float(volume)
+                    *
+                    float(
+                        volume
+                    )
                 )
 
                 notify_trade_open(
-                    symbol=trade["symbol"],
-                    side=side,
-                    entry=float(entry_price),
-                    stop_loss=float(
+                    symbol=
+                    trade["symbol"],
+
+                    side=
+                    side,
+
+                    entry=
+                    float(
+                        entry_price
+                    ),
+
+                    stop_loss=
+                    float(
                         stop_loss
                     ),
-                    take_profit=float(
+
+                    take_profit=
+                    float(
                         take_profit
                     ),
-                    notional=float(
+
+                    notional=
+                    float(
                         notional
                     ),
-                    risk=float(
+
+                    risk=
+                    float(
                         risk
                     ),
                 )
@@ -659,12 +779,14 @@ def monitor_active_trade(
             )
 
             if stop_txid:
+
                 safe_cancel(
                     kraken,
                     stop_txid
                 )
 
             if tp_txid:
+
                 safe_cancel(
                     kraken,
                     tp_txid
@@ -689,8 +811,10 @@ def monitor_active_trade(
                     )
                 )
 
-                emergency_txid = extract_txid(
-                    emergency_result
+                emergency_txid = (
+                    extract_txid(
+                        emergency_result
+                    )
                 )
 
                 print(
@@ -698,17 +822,20 @@ def monitor_active_trade(
                     f"{emergency_txid}"
                 )
 
-                state.close_trade(
-                    close_reason=
+                # Non consideriamo la posizione
+                # sicuramente chiusa finché Kraken
+                # non ne conferma l'esecuzione.
+                state.mark_exit_pending(
                     "EMERGENCY_PROTECTION_FAILURE"
                 )
 
                 send_telegram_message(
-                    "🚨 POSIZIONE CHIUSA "
-                    "IN EMERGENZA\n\n"
+                    "🚨 CHIUSURA EMERGENZA INVIATA\n\n"
                     f"Asset: {trade['symbol']}\n"
                     "Motivo: impossibile creare "
-                    "correttamente SL/TP."
+                    "correttamente SL/TP.\n"
+                    "Il bot verificherà la "
+                    "chiusura su Kraken."
                 )
 
             except Exception as emergency_error:
@@ -732,18 +859,22 @@ def monitor_active_trade(
 
             return True
 
-    # --------------------------------------------------------
+    # ========================================================
     # TRADE PROTETTO
-    # --------------------------------------------------------
+    # ========================================================
 
     if status == "PROTECTED":
 
-        stop_txid = trade.get(
-            "stop_txid"
+        stop_txid = (
+            trade.get(
+                "stop_txid"
+            )
         )
 
-        tp_txid = trade.get(
-            "take_profit_txid"
+        tp_txid = (
+            trade.get(
+                "take_profit_txid"
+            )
         )
 
         stop_order = (
@@ -774,7 +905,10 @@ def monitor_active_trade(
             )
         )
 
+        # ====================================================
         # TAKE PROFIT
+        # ====================================================
+
         if tp_filled:
 
             print(
@@ -794,7 +928,8 @@ def monitor_active_trade(
                 trade.get(
                     "entry_fill_price"
                 )
-                or trade[
+                or
+                trade[
                     "requested_entry_price"
                 ]
             )
@@ -803,7 +938,8 @@ def monitor_active_trade(
                 trade.get(
                     "entry_filled_volume"
                 )
-                or trade[
+                or
+                trade[
                     "requested_volume"
                 ]
             )
@@ -817,11 +953,20 @@ def monitor_active_trade(
                 )
             )
 
-            pnl = calculate_pnl(
-                side=trade["side"],
-                entry=entry_price,
-                exit_price=exit_price,
-                volume=volume,
+            pnl = (
+                calculate_pnl(
+                    side=
+                    trade["side"],
+
+                    entry=
+                    entry_price,
+
+                    exit_price=
+                    exit_price,
+
+                    volume=
+                    volume,
+                )
             )
 
             if not trade.get(
@@ -829,15 +974,20 @@ def monitor_active_trade(
             ):
 
                 notify_take_profit(
-                    symbol=trade[
-                        "symbol"
-                    ],
-                    side=trade[
-                        "side"
-                    ],
-                    entry=entry_price,
-                    exit_price=exit_price,
-                    profit=pnl,
+                    symbol=
+                    trade["symbol"],
+
+                    side=
+                    trade["side"],
+
+                    entry=
+                    entry_price,
+
+                    exit_price=
+                    exit_price,
+
+                    profit=
+                    pnl,
                 )
 
                 state.mark_telegram_close_sent()
@@ -845,13 +995,20 @@ def monitor_active_trade(
             state.close_trade(
                 close_reason=
                 "TAKE_PROFIT",
-                exit_price=exit_price,
-                pnl_eur=pnl,
+
+                exit_price=
+                exit_price,
+
+                pnl_eur=
+                pnl,
             )
 
             return True
 
+        # ====================================================
         # STOP LOSS
+        # ====================================================
+
         if stop_filled:
 
             print(
@@ -871,7 +1028,8 @@ def monitor_active_trade(
                 trade.get(
                     "entry_fill_price"
                 )
-                or trade[
+                or
+                trade[
                     "requested_entry_price"
                 ]
             )
@@ -880,7 +1038,8 @@ def monitor_active_trade(
                 trade.get(
                     "entry_filled_volume"
                 )
-                or trade[
+                or
+                trade[
                     "requested_volume"
                 ]
             )
@@ -894,11 +1053,20 @@ def monitor_active_trade(
                 )
             )
 
-            pnl = calculate_pnl(
-                side=trade["side"],
-                entry=entry_price,
-                exit_price=exit_price,
-                volume=volume,
+            pnl = (
+                calculate_pnl(
+                    side=
+                    trade["side"],
+
+                    entry=
+                    entry_price,
+
+                    exit_price=
+                    exit_price,
+
+                    volume=
+                    volume,
+                )
             )
 
             if not trade.get(
@@ -906,15 +1074,20 @@ def monitor_active_trade(
             ):
 
                 notify_stop_loss(
-                    symbol=trade[
-                        "symbol"
-                    ],
-                    side=trade[
-                        "side"
-                    ],
-                    entry=entry_price,
-                    exit_price=exit_price,
-                    loss=pnl,
+                    symbol=
+                    trade["symbol"],
+
+                    side=
+                    trade["side"],
+
+                    entry=
+                    entry_price,
+
+                    exit_price=
+                    exit_price,
+
+                    loss=
+                    pnl,
                 )
 
                 state.mark_telegram_close_sent()
@@ -922,14 +1095,69 @@ def monitor_active_trade(
             state.close_trade(
                 close_reason=
                 "STOP_LOSS",
-                exit_price=exit_price,
-                pnl_eur=pnl,
+
+                exit_price=
+                exit_price,
+
+                pnl_eur=
+                pnl,
             )
 
             return True
 
         print(
             "Trade ancora aperto e protetto."
+        )
+
+        return True
+
+    # ========================================================
+    # EXIT PENDING
+    # ========================================================
+
+    if status == "EXIT_PENDING":
+
+        print(
+            "Uscita già richiesta. "
+            "Verifica posizione Kraken."
+        )
+
+        try:
+
+            positions = (
+                kraken.get_open_positions()
+            )
+
+        except Exception as e:
+
+            print(
+                "Impossibile verificare "
+                f"le posizioni: {e}"
+            )
+
+            return True
+
+        if positions:
+
+            print(
+                "Posizione Kraken "
+                "ancora presente."
+            )
+
+            return True
+
+        state.close_trade(
+            close_reason=
+            trade.get(
+                "close_reason",
+                "EXIT_CONFIRMED"
+            )
+        )
+
+        print(
+            "Kraken non segnala più "
+            "posizioni aperte. "
+            "Trade marcato CLOSED."
         )
 
         return True
@@ -943,10 +1171,13 @@ def monitor_active_trade(
 
 def run():
 
-    now = datetime.now(
-        timezone.utc
-    ).strftime(
-        "%Y-%m-%d %H:%M:%S UTC"
+    now = (
+        datetime.now(
+            timezone.utc
+        )
+        .strftime(
+            "%Y-%m-%d %H:%M:%S UTC"
+        )
     )
 
     print(
@@ -965,10 +1196,15 @@ def run():
         "=" * 60
     )
 
+    # ========================================================
+    # CONTROLLO MODALITÀ
+    # ========================================================
+
     if config.TRADING_MODE not in (
         "PAPER",
         "LIVE",
     ):
+
         raise RuntimeError(
             "TRADING_MODE deve essere "
             "PAPER oppure LIVE"
@@ -976,15 +1212,22 @@ def run():
 
     if (
         config.TRADING_MODE == "LIVE"
-        and not config.ALLOW_LIVE_TRADING
+        and
+        not config.ALLOW_LIVE_TRADING
     ):
+
         raise RuntimeError(
             "LIVE richiesto ma "
             "ALLOW_LIVE_TRADING non è true"
         )
 
-    kraken = KrakenClient()
-    state = TradeState()
+    kraken = (
+        KrakenClient()
+    )
+
+    state = (
+        TradeState()
+    )
 
     # ========================================================
     # SALDO
@@ -1028,7 +1271,7 @@ def run():
     )
 
     # ========================================================
-    # PRIMA CONTROLLA EVENTUALE TRADE ATTIVO
+    # TRADE ATTIVO HA SEMPRE PRIORITÀ
     # ========================================================
 
     try:
@@ -1047,7 +1290,10 @@ def run():
 
     if active_trade:
 
-        if config.TRADING_MODE == "LIVE":
+        if (
+            config.TRADING_MODE
+            == "LIVE"
+        ):
 
             monitor_active_trade(
                 kraken,
@@ -1082,10 +1328,14 @@ def run():
 
     try:
 
-        risk_allowed = check_risk_limits(
-            state=state,
-            operating_capital=
-            operating_capital,
+        risk_allowed = (
+            check_risk_limits(
+                state=
+                state,
+
+                operating_capital=
+                operating_capital,
+            )
         )
 
     except Exception as e:
@@ -1094,6 +1344,7 @@ def run():
             f"ERRORE RISK CONTROL: {e}"
         )
 
+        # Fail closed
         return
 
     if not risk_allowed:
@@ -1105,7 +1356,7 @@ def run():
         return
 
     # ========================================================
-    # CONTROLLO KRAKEN
+    # CONTROLLO POSIZIONI / ORDINI KRAKEN
     # ========================================================
 
     try:
@@ -1138,7 +1389,9 @@ def run():
         if orders:
 
             print(
-                "Kraken segnala ordini aperti."
+                "Kraken segnala ordini aperti "
+                "non associati a un trade "
+                "attivo Firestore."
             )
 
             return
@@ -1157,7 +1410,9 @@ def run():
 
     try:
 
-        guard = AnthropicGuard()
+        guard = (
+            AnthropicGuard()
+        )
 
     except Exception as e:
 
@@ -1175,17 +1430,23 @@ def run():
         config.PAIRS.items()
     ):
 
-        pair = pair_info[
-            "pair"
-        ]
+        pair = (
+            pair_info[
+                "pair"
+            ]
+        )
 
-        allocation_pct = pair_info[
-            "allocation_pct"
-        ]
+        allocation_pct = (
+            pair_info[
+                "allocation_pct"
+            ]
+        )
 
-        min_notional = pair_info[
-            "min_notional_eur"
-        ]
+        min_notional = (
+            pair_info[
+                "min_notional_eur"
+            ]
+        )
 
         print(
             "\n" + "-" * 60
@@ -1214,27 +1475,37 @@ def run():
             f"{target_notional:.2f} EUR"
         )
 
+        # ====================================================
+        # DATI
+        # ====================================================
+
         try:
 
-            h4 = kraken.get_ohlc(
-                pair,
-                config.TIMEFRAMES[
-                    "TREND"
-                ],
+            h4 = (
+                kraken.get_ohlc(
+                    pair,
+                    config.TIMEFRAMES[
+                        "TREND"
+                    ],
+                )
             )
 
-            h1 = kraken.get_ohlc(
-                pair,
-                config.TIMEFRAMES[
-                    "CONFIRMATION"
-                ],
+            h1 = (
+                kraken.get_ohlc(
+                    pair,
+                    config.TIMEFRAMES[
+                        "CONFIRMATION"
+                    ],
+                )
             )
 
-            m15 = kraken.get_ohlc(
-                pair,
-                config.TIMEFRAMES[
-                    "ENTRY"
-                ],
+            m15 = (
+                kraken.get_ohlc(
+                    pair,
+                    config.TIMEFRAMES[
+                        "ENTRY"
+                    ],
+                )
             )
 
         except Exception as e:
@@ -1257,13 +1528,43 @@ def run():
 
             continue
 
+        # ====================================================
+        # IDENTIFICATIVO CANDELA
+        # ====================================================
+
+        signal_candle = (
+            get_candle_id(
+                m15
+            )
+        )
+
+        if signal_candle is None:
+
+            print(
+                "Impossibile identificare "
+                "la candela M15."
+            )
+
+            continue
+
+        print(
+            f"Candela M15: "
+            f"{signal_candle}"
+        )
+
+        # ====================================================
+        # ANALISI STRATEGIA
+        # ====================================================
+
         try:
 
-            analysis = analyze_market(
-                h4,
-                h1,
-                m15,
-                symbol,
+            analysis = (
+                analyze_market(
+                    h4,
+                    h1,
+                    m15,
+                    symbol,
+                )
             )
 
         except Exception as e:
@@ -1273,7 +1574,90 @@ def run():
                 f"{symbol}: {e}"
             )
 
+            # Non claimiamo la candela.
+            # Potrà essere ritentata.
             continue
+
+        action = (
+            analysis.get(
+                "action",
+                "HOLD"
+            )
+        )
+
+        reason = (
+            analysis.get(
+                "reason",
+                "Nessun motivo disponibile"
+            )
+        )
+
+        # ====================================================
+        # CLAIM ATOMICO CANDELA
+        # ====================================================
+
+        try:
+
+            claimed = (
+                state.claim_signal_candle(
+                    symbol=
+                    symbol,
+
+                    candle_id=
+                    signal_candle,
+
+                    action=
+                    action,
+                )
+            )
+
+        except Exception as e:
+
+            print(
+                "ERRORE IDEMPOTENZA "
+                f"{symbol}: {e}"
+            )
+
+            # Fail closed:
+            # senza Firestore non apriamo trade.
+            continue
+
+        if not claimed:
+
+            print(
+                f"SKIP {symbol}: "
+                "candela M15 già processata."
+            )
+
+            continue
+
+        # Salviamo anche motivo e risultato.
+        try:
+
+            state.update_signal_result(
+                symbol=
+                symbol,
+
+                candle_id=
+                signal_candle,
+
+                action=
+                action,
+
+                reason=
+                reason,
+            )
+
+        except Exception as e:
+
+            print(
+                "Avviso: impossibile aggiornare "
+                f"il risultato candela: {e}"
+            )
+
+        # ====================================================
+        # LOG SEGNALE
+        # ====================================================
 
         print(
             f"Prezzo: "
@@ -1282,17 +1666,19 @@ def run():
 
         print(
             f"Segnale: "
-            f"{analysis.get('action')}"
+            f"{action}"
         )
 
         print(
             f"Motivo: "
-            f"{analysis.get('reason')}"
+            f"{reason}"
         )
 
-        if analysis.get(
-            "action"
-        ) not in (
+        # ====================================================
+        # HOLD
+        # ====================================================
+
+        if action not in (
             "BUY",
             "SELL",
         ):
@@ -1303,9 +1689,13 @@ def run():
 
             continue
 
-        side = analysis[
-            "action"
-        ]
+        # ====================================================
+        # SEGNALE BUY / SELL
+        # ====================================================
+
+        side = (
+            action
+        )
 
         entry = float(
             analysis[
@@ -1325,13 +1715,27 @@ def run():
             ]
         )
 
-        sizing = calculate_position_size(
-            capital=operating_capital,
-            allocation_pct=
-            allocation_pct,
-            entry=entry,
-            stop_loss=stop_loss,
-            min_notional=min_notional,
+        # ====================================================
+        # POSITION SIZING
+        # ====================================================
+
+        sizing = (
+            calculate_position_size(
+                capital=
+                operating_capital,
+
+                allocation_pct=
+                allocation_pct,
+
+                entry=
+                entry,
+
+                stop_loss=
+                stop_loss,
+
+                min_notional=
+                min_notional,
+            )
         )
 
         if not sizing[
@@ -1345,17 +1749,23 @@ def run():
 
             continue
 
-        quantity = sizing[
-            "quantity"
-        ]
+        quantity = (
+            sizing[
+                "quantity"
+            ]
+        )
 
-        notional = sizing[
-            "notional"
-        ]
+        notional = (
+            sizing[
+                "notional"
+            ]
+        )
 
-        actual_risk = sizing[
-            "actual_risk"
-        ]
+        actual_risk = (
+            sizing[
+                "actual_risk"
+            ]
+        )
 
         # ====================================================
         # AI GUARD
@@ -1417,15 +1827,24 @@ def run():
                     actual_risk,
                     2
                 ),
+
+            "signal_candle":
+                signal_candle,
         }
 
         try:
 
             ai_result = (
                 guard.evaluate_market_risk(
-                    asset=symbol,
-                    side=side,
-                    current_price=entry,
+                    asset=
+                    symbol,
+
+                    side=
+                    side,
+
+                    current_price=
+                    entry,
+
                     technical_data=
                     technical_data,
                 )
@@ -1437,6 +1856,8 @@ def run():
                 f"AI Guard error: {e}"
             )
 
+            # Candela resta processata.
+            # Non riproviamo lo stesso segnale.
             continue
 
         print(
@@ -1507,71 +1928,91 @@ def run():
         # ====================================================
 
         if symbol == "BTC":
+
             leverage = (
                 config.LEVERAGE_BTC
             )
+
         else:
+
             leverage = (
                 config.LEVERAGE_ETH
             )
 
-        # Identificativo candela M15
+        # ====================================================
+        # CREA STATO PRIMA DELL'ENTRY
+        # ====================================================
+
         try:
 
-            candle_time = (
-                m15.iloc[-1][
-                    "time"
-                ]
+            state.create_trade(
+                symbol=
+                symbol,
+
+                pair=
+                pair,
+
+                side=
+                side,
+
+                requested_entry_price=
+                entry,
+
+                requested_volume=
+                quantity,
+
+                stop_loss=
+                stop_loss,
+
+                take_profit=
+                take_profit,
+
+                leverage=
+                leverage,
+
+                signal_candle=
+                signal_candle,
             )
 
-            if hasattr(
-                candle_time,
-                "isoformat"
-            ):
-                signal_candle = (
-                    candle_time.isoformat()
-                )
-            else:
-                signal_candle = str(
-                    candle_time
-                )
+        except Exception as e:
 
-        except Exception:
+            print(
+                "ERRORE CREAZIONE STATO "
+                f"TRADE: {e}"
+            )
 
-            signal_candle = None
+            # Non inviamo l'ordine se
+            # Firestore non è pronto.
+            continue
 
-        # Prima salviamo l'intenzione
-        # su Firestore.
-        state.create_trade(
-            symbol=symbol,
-            pair=pair,
-            side=side,
-            requested_entry_price=
-            entry,
-            requested_volume=
-            quantity,
-            stop_loss=stop_loss,
-            take_profit=
-            take_profit,
-            leverage=leverage,
-            signal_candle=
-            signal_candle,
-        )
+        # ====================================================
+        # ENTRY KRAKEN
+        # ====================================================
 
         try:
 
             entry_result = (
                 kraken.create_market_order(
-                    pair=pair,
-                    side=side,
-                    volume=quantity,
-                    leverage=leverage,
+                    pair=
+                    pair,
+
+                    side=
+                    side,
+
+                    volume=
+                    quantity,
+
+                    leverage=
+                    leverage,
+
                     validate=False,
                 )
             )
 
-            entry_txid = extract_txid(
-                entry_result
+            entry_txid = (
+                extract_txid(
+                    entry_result
+                )
             )
 
             if not entry_txid:
@@ -1596,12 +2037,17 @@ def run():
                 f"ENTRY FALLITA: {e}"
             )
 
+            # La candela resta processata:
+            # evitiamo un secondo ordine
+            # sullo stesso segnale.
             state.clear_trade()
 
             continue
 
-        # Il market order normalmente
-        # viene eseguito rapidamente.
+        # ====================================================
+        # ATTESA BREVE DEL FILL
+        # ====================================================
+
         for _ in range(10):
 
             time.sleep(1)
@@ -1639,11 +2085,16 @@ def run():
                 state.mark_entry_filled(
                     fill_price=
                     fill_price,
+
                     filled_volume=
                     filled_volume,
                 )
 
                 break
+
+        # ====================================================
+        # PROTEGGI POSIZIONE
+        # ====================================================
 
         trade = (
             state.get_active_trade()
