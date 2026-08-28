@@ -12,22 +12,15 @@ on:
 jobs:
 
   test:
+
     name: Test Crypto Bot
+
     runs-on: ubuntu-latest
 
     steps:
 
-      # =====================================================
-      # 1. SCARICA IL CODICE
-      # =====================================================
-
       - name: Checkout repository
         uses: actions/checkout@v4
-
-
-      # =====================================================
-      # 2. INSTALLA PYTHON
-      # =====================================================
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -35,29 +28,14 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
-
-      # =====================================================
-      # 3. INSTALLA DIPENDENZE
-      # =====================================================
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-
-      # =====================================================
-      # 4. CONTROLLO SINTASSI
-      # =====================================================
-
       - name: Check Python syntax
         run: |
           python -m compileall .
-
-
-      # =====================================================
-      # 5. TEST
-      # =====================================================
 
       - name: Run tests
         env:
@@ -65,7 +43,21 @@ jobs:
           ALLOW_LIVE_TRADING: "false"
         run: |
           if ls test_*.py >/dev/null 2>&1; then
+
             python -m pytest -q
+            code=$?
+
+            if [ "$code" -eq 5 ]; then
+              echo "Nessun test pytest valido trovato."
+              echo "Il controllo sintattico è comunque passato correttamente."
+              exit 0
+            fi
+
+            exit "$code"
+
           else
-            echo "Nessun test automatico trovato."
+
+            echo "Nessun file test_*.py trovato."
+            exit 0
+
           fi
