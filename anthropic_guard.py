@@ -2,51 +2,105 @@ import json
 import anthropic
 import config
 
+
 class AnthropicGuard:
+
     def __init__(self):
-        self.client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
 
-    def evaluate_news_impact(self, asset, side, current_price):
-        """
-        Valuta il sentiment e le notizie di mercato rispetto al segnale generato.
-        Restituisce: (decision, news_summary, reason)
-        - decision: 'BLOCK', 'GO', 'BOOST_GO'
-        """
-        prompt = f"""Sei un News & Sentiment Risk Analyst per un bot di quantitative trading su criptovalute.
-Il tuo compito è analizzare il contesto attuale delle notizie/sentiment per l'asset {asset} rispetto al segnale di trading generato.
+        if not config.ANTHROPIC_API_KEY:
 
-Dati Operazione Proposta:
-- Asset: {asset}
-- Segnale Tecnico: {side}
-- Prezzo Attuale: {current_price} EUR
+            raise RuntimeError(
+                "ANTHROPIC_API_KEY mancante"
+            )
 
-REGOLE RIGIDE DI DECISIONE:
-1. "BLOCK": Se ci sono notizie chiaramente CONTRARIE al segnale (es. segnale BUY ma ci sono news catastrofiche, FUD, hack, regolamentazioni punitive, o segnale SELL con news estremamente positive).
-2. "GO": Se le notizie sono NEUTRE, assenti o bilanciate, oppure il mercato sta seguendo la dinamica normale senza news rilevanti.
-3. "BOOST_GO": Se ci sono notizie fortemente A FAVORE del segnale (es. segnale BUY supportato da approvazioni normative, adozione, catalizzatori macro rialzisti, o segnale SELL con notizie fortemente negative sull'asset).
+        self.client = anthropic.Anthropic(
+            api_key=config.ANTHROPIC_API_KEY
+        )
 
-Rispondi ESCLUSIVAMENTE in formato JSON con la seguente struttura:
+
+    def evaluate_news_impact(
+        self,
+        asset,
+        side,
+        current_price
+    ):
+
+        prompt = f"""
+Sei un Risk Analyst per un bot quantitativo.
+
+Asset: {asset}
+Segnale tecnico: {side}
+Prezzo: {current_price} EUR
+
+Valuta se il contesto di mercato/news presenta
+un rischio evidente contrario al segnale.
+
+Rispondi ESCLUSIVAMENTE JSON:
+
 {{
-    "decision": "BLOCK" oppure "GO" oppure "BOOST_GO",
-    "news_summary": "Sintesi di 1 frase sul quadro notizie rilevato",
-    "reason": "Spiegazione della decisione in massimo 2 frasi"
-}}"""
+    "decision": "BLOCK" | "GO" | "BOOST_GO",
+    "news_summary": "massimo una frase",
+    "reason": "massimo due frasi"
+}}
+"""
 
         try:
+
             response = self.client.messages.create(
-                model="claude-3-5-sonnet-20241022",
+
+                model=config.ANTHROPIC_MODEL,
+
                 max_tokens=250,
-                temperature=0.1,
-                messages=[{"role": "user", "content": prompt}]
+
+                temperature=0,
+
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ]
             )
+
             text = response.content[0].text.strip()
+
             data = json.loads(text)
-            
-            return (
-                data.get("decision", "GO"),
-                data.get("news_summary", "Nessuna notizia rilevante"),
-                data.get("reason", "Nessuna motivazione fornita")
+
+            decision = data.get(
+                "decision",
+                "BLOCK"
             )
+
+            if decision not in [
+                "BLOCK",
+                "GO",
+                "BOOST_GO"
+            ]:
+
+                decision = "BLOCK"
+
+            return (
+                decision,
+                data.get(
+                    "news_summary",
+                    ""
+                ),
+                data.get(
+                    "reason",
+                    ""
+                )
+            )
+
         except Exception as e:
-            print(f"⚠️ Errore API Notizie AI: {e}. Fallback su decisione neutra (GO).")
-            return "GO", "Errore API", "Fallback di sicurezza su leva standard"
+
+            print(
+                f"❌ Anthropic error: {e}"
+            )
+
+            # FAIL SAFE:
+            # se AI non funziona NON TRADIAMO
+            return (
+                "BLOCK",
+                "AI non disponibile",
+                "Trade bloccato per sicurezza"
+            )
