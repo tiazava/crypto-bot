@@ -74,6 +74,25 @@ class KrakenClient:
 
         return f"cb-{prefix}-{random_part}"
 
+        # ========================================================
+    # GENERA CLIENT ORDER ID PUBBLICO
+    # ========================================================
+
+    def generate_client_order_id(
+        self,
+        order_type="entry"
+    ):
+        """
+        Genera un identificativo univoco da salvare
+        in Firestore PRIMA di inviare l'ordine a Kraken.
+
+        In questo modo lo stesso ordine può essere
+        riconciliato dopo un crash del bot.
+        """
+
+        return self._generate_client_order_id(
+            order_type
+        )
     # ========================================================
     # SALDO ACCOUNT
     # ========================================================
