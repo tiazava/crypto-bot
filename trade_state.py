@@ -1,10 +1,11 @@
-from datetime import datetime, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from google.cloud import firestore
 
 
 # ============================================================
-# FIRESTORE
+# CONFIGURAZIONE FIRESTORE
 # ============================================================
 
 TRADE_COLLECTION_NAME = "trade_state"
@@ -13,52 +14,85 @@ RISK_DOCUMENT_ID = "risk_state"
 
 SIGNAL_COLLECTION_NAME = "signal_state"
 
+ROME_TZ = ZoneInfo("Europe/Rome")
+
 
 class TradeState:
 
     def __init__(self):
+
         self.db = firestore.Client()
 
     # ========================================================
-    # UTILITÀ
+    # TEMPO
     # ========================================================
 
     def _now(self):
-        return datetime.now(
-            timezone.utc
-        ).isoformat()
+
+        return (
+            datetime.now(
+                ROME_TZ
+            )
+            .isoformat()
+        )
 
     def _today(self):
-        return datetime.now(
-            timezone.utc
-        ).date().isoformat()
+
+        return (
+            datetime.now(
+                ROME_TZ
+            )
+            .date()
+            .isoformat()
+        )
+
+    # ========================================================
+    # DOCUMENT REFERENCES
+    # ========================================================
 
     def _trade_ref(self):
+
         return (
             self.db
-            .collection(TRADE_COLLECTION_NAME)
-            .document(ACTIVE_TRADE_DOCUMENT_ID)
+            .collection(
+                TRADE_COLLECTION_NAME
+            )
+            .document(
+                ACTIVE_TRADE_DOCUMENT_ID
+            )
         )
 
     def _risk_ref(self):
+
         return (
             self.db
-            .collection(TRADE_COLLECTION_NAME)
-            .document(RISK_DOCUMENT_ID)
+            .collection(
+                TRADE_COLLECTION_NAME
+            )
+            .document(
+                RISK_DOCUMENT_ID
+            )
         )
 
     def _signal_ref(
         self,
-        symbol
+        symbol,
     ):
-        symbol = str(
-            symbol
-        ).upper().strip()
+
+        symbol = (
+            str(symbol)
+            .upper()
+            .strip()
+        )
 
         return (
             self.db
-            .collection(SIGNAL_COLLECTION_NAME)
-            .document(symbol)
+            .collection(
+                SIGNAL_COLLECTION_NAME
+            )
+            .document(
+                symbol
+            )
         )
 
     # ========================================================
@@ -75,7 +109,9 @@ class TradeState:
         if not snapshot.exists:
             return None
 
-        data = snapshot.to_dict()
+        data = (
+            snapshot.to_dict()
+        )
 
         if not data:
             return None
@@ -84,7 +120,9 @@ class TradeState:
 
     def get_active_trade(self):
 
-        trade = self.get_trade()
+        trade = (
+            self.get_trade()
+        )
 
         if not trade:
             return None
@@ -101,6 +139,7 @@ class TradeState:
             trade.get("status")
             not in active_statuses
         ):
+
             return None
 
         return trade
@@ -123,20 +162,27 @@ class TradeState:
         entry_client_order_id=None,
     ):
 
-        now = self._now()
+        now = (
+            self._now()
+        )
 
         data = {
+
             "status":
                 "ENTRY_PENDING",
 
             "symbol":
-                symbol,
+                str(
+                    symbol
+                ).upper(),
 
             "pair":
                 pair,
 
             "side":
-                side.upper(),
+                str(
+                    side
+                ).upper(),
 
             "requested_entry_price":
                 float(
@@ -163,6 +209,10 @@ class TradeState:
                     leverage
                 ),
 
+            # ================================================
+            # ENTRY
+            # ================================================
+
             "entry_client_order_id":
                 entry_client_order_id,
 
@@ -175,11 +225,19 @@ class TradeState:
             "entry_filled_volume":
                 None,
 
+            # ================================================
+            # STOP LOSS
+            # ================================================
+
             "stop_client_order_id":
                 None,
 
             "stop_txid":
                 None,
+
+            # ================================================
+            # TAKE PROFIT
+            # ================================================
 
             "take_profit_client_order_id":
                 None,
@@ -187,8 +245,26 @@ class TradeState:
             "take_profit_txid":
                 None,
 
+            # ================================================
+            # EMERGENCY EXIT
+            # ================================================
+
+            "emergency_client_order_id":
+                None,
+
+            "emergency_txid":
+                None,
+
+            # ================================================
+            # SIGNAL
+            # ================================================
+
             "signal_candle":
                 signal_candle,
+
+            # ================================================
+            # EXIT
+            # ================================================
 
             "close_reason":
                 None,
@@ -199,11 +275,26 @@ class TradeState:
             "pnl_eur":
                 None,
 
+            # Protezione contro doppio conteggio P&L.
+            "risk_result_recorded":
+                False,
+
+            "risk_result_recorded_at":
+                None,
+
+            # ================================================
+            # TELEGRAM
+            # ================================================
+
             "telegram_open_sent":
                 False,
 
             "telegram_close_sent":
                 False,
+
+            # ================================================
+            # TIMESTAMP
+            # ================================================
 
             "created_at":
                 now,
@@ -224,8 +315,8 @@ class TradeState:
 
     def set_entry_order(
         self,
-        txid,
-        client_order_id=None
+        txid=None,
+        client_order_id=None,
     ):
 
         update = {
@@ -240,7 +331,11 @@ class TradeState:
 
             update[
                 "entry_client_order_id"
-            ] = client_order_id
+            ] = (
+                str(
+                    client_order_id
+                )
+            )
 
         self._trade_ref().update(
             update
@@ -249,7 +344,7 @@ class TradeState:
     def mark_entry_filled(
         self,
         fill_price,
-        filled_volume
+        filled_volume,
     ):
 
         self._trade_ref().update(
@@ -277,7 +372,7 @@ class TradeState:
     # ========================================================
 
     def mark_protection_pending(
-        self
+        self,
     ):
 
         self._trade_ref().update(
@@ -292,8 +387,8 @@ class TradeState:
 
     def set_stop_order(
         self,
-        txid,
-        client_order_id=None
+        txid=None,
+        client_order_id=None,
     ):
 
         update = {
@@ -308,7 +403,11 @@ class TradeState:
 
             update[
                 "stop_client_order_id"
-            ] = client_order_id
+            ] = (
+                str(
+                    client_order_id
+                )
+            )
 
         self._trade_ref().update(
             update
@@ -316,8 +415,8 @@ class TradeState:
 
     def set_take_profit_order(
         self,
-        txid,
-        client_order_id=None
+        txid=None,
+        client_order_id=None,
     ):
 
         update = {
@@ -332,17 +431,23 @@ class TradeState:
 
             update[
                 "take_profit_client_order_id"
-            ] = client_order_id
+            ] = (
+                str(
+                    client_order_id
+                )
+            )
 
         self._trade_ref().update(
             update
         )
 
     def mark_protected(
-        self
+        self,
     ):
 
-        trade = self.get_trade()
+        trade = (
+            self.get_trade()
+        )
 
         if not trade:
 
@@ -366,7 +471,9 @@ class TradeState:
                 "Take Profit non presente"
             )
 
-        now = self._now()
+        now = (
+            self._now()
+        )
 
         self._trade_ref().update(
             {
@@ -382,12 +489,44 @@ class TradeState:
         )
 
     # ========================================================
-    # USCITA
+    # EMERGENCY ORDER
+    # ========================================================
+
+    def set_emergency_order(
+        self,
+        txid=None,
+        client_order_id=None,
+    ):
+
+        update = {
+            "emergency_txid":
+                txid,
+
+            "updated_at":
+                self._now(),
+        }
+
+        if client_order_id:
+
+            update[
+                "emergency_client_order_id"
+            ] = (
+                str(
+                    client_order_id
+                )
+            )
+
+        self._trade_ref().update(
+            update
+        )
+
+    # ========================================================
+    # EXIT PENDING
     # ========================================================
 
     def mark_exit_pending(
         self,
-        close_reason
+        close_reason,
     ):
 
         self._trade_ref().update(
@@ -403,6 +542,10 @@ class TradeState:
             }
         )
 
+    # ========================================================
+    # CHIUSURA TRADE ATOMICA + IDEMPOTENTE
+    # ========================================================
+
     def close_trade(
         self,
         close_reason,
@@ -410,59 +553,326 @@ class TradeState:
         pnl_eur=None,
     ):
 
-        now = self._now()
-
-        update = {
-            "status":
-                "CLOSED",
-
-            "close_reason":
-                close_reason,
-
-            "closed_at":
-                now,
-
-            "updated_at":
-                now,
-        }
-
-        if exit_price is not None:
-
-            update[
-                "exit_price"
-            ] = float(
-                exit_price
-            )
-
-        if pnl_eur is not None:
-
-            update[
-                "pnl_eur"
-            ] = float(
-                pnl_eur
-            )
-
-        self._trade_ref().update(
-            update
+        trade_ref = (
+            self._trade_ref()
         )
 
-        # Aggiorna automaticamente
-        # il risk state con il risultato
-        # del trade.
-        if pnl_eur is not None:
+        risk_ref = (
+            self._risk_ref()
+        )
 
-            self.record_trade_result(
+        transaction = (
+            self.db.transaction()
+        )
+
+        today = (
+            self._today()
+        )
+
+        now = (
+            self._now()
+        )
+
+        @firestore.transactional
+        def close_transaction(
+            transaction,
+        ):
+
+            trade_snapshot = (
+                trade_ref.get(
+                    transaction=transaction
+                )
+            )
+
+            if not trade_snapshot.exists:
+
+                raise RuntimeError(
+                    "Trade Firestore non presente"
+                )
+
+            trade = (
+                trade_snapshot.to_dict()
+                or {}
+            )
+
+            # ================================================
+            # DATI BASE CHIUSURA
+            # ================================================
+
+            trade_update = {
+
+                "status":
+                    "CLOSED",
+
+                "close_reason":
+                    close_reason,
+
+                "closed_at":
+                    trade.get(
+                        "closed_at"
+                    )
+                    or now,
+
+                "updated_at":
+                    now,
+            }
+
+            if (
+                exit_price
+                is not None
+            ):
+
+                trade_update[
+                    "exit_price"
+                ] = (
+                    float(
+                        exit_price
+                    )
+                )
+
+            if (
+                pnl_eur
+                is not None
+            ):
+
+                trade_update[
+                    "pnl_eur"
+                ] = (
+                    float(
+                        pnl_eur
+                    )
+                )
+
+            # ================================================
+            # SENZA PNL:
+            # chiudiamo soltanto il trade.
+            # ================================================
+
+            if (
+                pnl_eur
+                is None
+            ):
+
+                transaction.update(
+                    trade_ref,
+                    trade_update,
+                )
+
+                return {
+                    "closed":
+                        True,
+
+                    "risk_recorded":
+                        False,
+
+                    "already_recorded":
+                        bool(
+                            trade.get(
+                                "risk_result_recorded",
+                                False,
+                            )
+                        ),
+                }
+
+            # ================================================
+            # IDEMPOTENZA RISULTATO
+            # ================================================
+
+            already_recorded = bool(
+                trade.get(
+                    "risk_result_recorded",
+                    False,
+                )
+            )
+
+            if already_recorded:
+
+                # Trade può essere richiuso/retry,
+                # ma il P&L NON viene sommato di nuovo.
+
+                transaction.update(
+                    trade_ref,
+                    trade_update,
+                )
+
+                return {
+                    "closed":
+                        True,
+
+                    "risk_recorded":
+                        False,
+
+                    "already_recorded":
+                        True,
+                }
+
+            # ================================================
+            # LETTURA RISK NELLA STESSA TRANSAZIONE
+            # ================================================
+
+            risk_snapshot = (
+                risk_ref.get(
+                    transaction=transaction
+                )
+            )
+
+            if risk_snapshot.exists:
+
+                risk = (
+                    risk_snapshot.to_dict()
+                    or {}
+                )
+
+            else:
+
+                risk = {}
+
+            # ================================================
+            # RESET GIORNO
+            # ================================================
+
+            if (
+                risk.get("date")
+                != today
+            ):
+
+                daily_pnl = 0.0
+
+                consecutive_losses = int(
+                    risk.get(
+                        "consecutive_losses",
+                        0,
+                    )
+                )
+
+                trading_blocked = False
+                block_reason = None
+
+            else:
+
+                daily_pnl = float(
+                    risk.get(
+                        "daily_pnl_eur",
+                        0.0,
+                    )
+                )
+
+                consecutive_losses = int(
+                    risk.get(
+                        "consecutive_losses",
+                        0,
+                    )
+                )
+
+                trading_blocked = bool(
+                    risk.get(
+                        "trading_blocked",
+                        False,
+                    )
+                )
+
+                block_reason = (
+                    risk.get(
+                        "block_reason"
+                    )
+                )
+
+            pnl_value = (
                 float(
                     pnl_eur
                 )
             )
+
+            daily_pnl += (
+                pnl_value
+            )
+
+            if pnl_value < 0:
+
+                consecutive_losses += 1
+
+            else:
+
+                consecutive_losses = 0
+
+            risk_update = {
+
+                "date":
+                    today,
+
+                "daily_pnl_eur":
+                    float(
+                        daily_pnl
+                    ),
+
+                "consecutive_losses":
+                    int(
+                        consecutive_losses
+                    ),
+
+                "trading_blocked":
+                    trading_blocked,
+
+                "block_reason":
+                    block_reason,
+
+                "updated_at":
+                    now,
+            }
+
+            # ================================================
+            # MARCA RISULTATO REGISTRATO
+            # NELLA STESSA TRANSAZIONE
+            # ================================================
+
+            trade_update[
+                "risk_result_recorded"
+            ] = True
+
+            trade_update[
+                "risk_result_recorded_at"
+            ] = now
+
+            transaction.set(
+                risk_ref,
+                risk_update,
+                merge=True,
+            )
+
+            transaction.update(
+                trade_ref,
+                trade_update,
+            )
+
+            return {
+                "closed":
+                    True,
+
+                "risk_recorded":
+                    True,
+
+                "already_recorded":
+                    False,
+
+                "daily_pnl_eur":
+                    daily_pnl,
+
+                "consecutive_losses":
+                    consecutive_losses,
+            }
+
+        return (
+            close_transaction(
+                transaction
+            )
+        )
 
     # ========================================================
     # TELEGRAM
     # ========================================================
 
     def mark_telegram_open_sent(
-        self
+        self,
     ):
 
         self._trade_ref().update(
@@ -476,7 +886,7 @@ class TradeState:
         )
 
     def mark_telegram_close_sent(
-        self
+        self,
     ):
 
         self._trade_ref().update(
@@ -495,7 +905,7 @@ class TradeState:
 
     def mark_error(
         self,
-        message
+        message,
     ):
 
         self._trade_ref().update(
@@ -514,26 +924,26 @@ class TradeState:
         )
 
     # ========================================================
-    # CANCELLAZIONE TRADE
+    # CANCELLA TRADE
+    # Solo manutenzione/test.
     # ========================================================
 
     def clear_trade(
-        self
+        self,
     ):
 
         self._trade_ref().delete()
 
     # ========================================================
-    # RISK STATE
+    # RISK STATE DEFAULT
     # ========================================================
 
     def _default_risk_state(
-        self
+        self,
     ):
 
-        now = self._now()
-
         return {
+
             "date":
                 self._today(),
 
@@ -550,16 +960,23 @@ class TradeState:
                 None,
 
             "updated_at":
-                now,
+                self._now(),
         }
 
+    # ========================================================
+    # LETTURA RISK STATE
+    # ========================================================
+
     def get_risk_state(
-        self
+        self,
     ):
 
-        snapshot = (
+        risk_ref = (
             self._risk_ref()
-            .get()
+        )
+
+        snapshot = (
+            risk_ref.get()
         )
 
         if not snapshot.exists:
@@ -568,7 +985,7 @@ class TradeState:
                 self._default_risk_state()
             )
 
-            self._risk_ref().set(
+            risk_ref.set(
                 data
             )
 
@@ -576,6 +993,7 @@ class TradeState:
 
         data = (
             snapshot.to_dict()
+            or {}
         )
 
         if not data:
@@ -584,15 +1002,15 @@ class TradeState:
                 self._default_risk_state()
             )
 
-            self._risk_ref().set(
+            risk_ref.set(
                 data
             )
 
             return data
 
-        # ====================================================
-        # NUOVO GIORNO
-        # ====================================================
+        # ================================================
+        # NUOVO GIORNO OPERATIVO - EUROPE/ROME
+        # ================================================
 
         if (
             data.get("date")
@@ -602,11 +1020,12 @@ class TradeState:
             consecutive_losses = int(
                 data.get(
                     "consecutive_losses",
-                    0
+                    0,
                 )
             )
 
             data = {
+
                 "date":
                     self._today(),
 
@@ -626,76 +1045,159 @@ class TradeState:
                     self._now(),
             }
 
-            self._risk_ref().set(
+            risk_ref.set(
                 data
             )
 
         return data
 
     # ========================================================
-    # REGISTRA RISULTATO TRADE
+    # RECORD TRADE RESULT
+    #
+    # Manteniamo questa funzione per compatibilità,
+    # ma la chiusura normale deve usare close_trade(),
+    # che è atomica e idempotente.
     # ========================================================
 
     def record_trade_result(
         self,
-        pnl_eur
+        pnl_eur,
     ):
 
-        risk = (
-            self.get_risk_state()
+        risk_ref = (
+            self._risk_ref()
         )
 
-        pnl_eur = float(
-            pnl_eur
+        transaction = (
+            self.db.transaction()
         )
 
-        daily_pnl = float(
-            risk.get(
-                "daily_pnl_eur",
-                0.0
+        today = (
+            self._today()
+        )
+
+        now = (
+            self._now()
+        )
+
+        pnl_value = (
+            float(
+                pnl_eur
             )
         )
 
-        daily_pnl += pnl_eur
+        @firestore.transactional
+        def record(
+            transaction,
+        ):
 
-        consecutive_losses = int(
-            risk.get(
-                "consecutive_losses",
-                0
+            snapshot = (
+                risk_ref.get(
+                    transaction=transaction
+                )
             )
+
+            if snapshot.exists:
+
+                risk = (
+                    snapshot.to_dict()
+                    or {}
+                )
+
+            else:
+
+                risk = {}
+
+            if (
+                risk.get("date")
+                != today
+            ):
+
+                daily_pnl = 0.0
+
+                consecutive_losses = int(
+                    risk.get(
+                        "consecutive_losses",
+                        0,
+                    )
+                )
+
+                trading_blocked = False
+                block_reason = None
+
+            else:
+
+                daily_pnl = float(
+                    risk.get(
+                        "daily_pnl_eur",
+                        0.0,
+                    )
+                )
+
+                consecutive_losses = int(
+                    risk.get(
+                        "consecutive_losses",
+                        0,
+                    )
+                )
+
+                trading_blocked = bool(
+                    risk.get(
+                        "trading_blocked",
+                        False,
+                    )
+                )
+
+                block_reason = (
+                    risk.get(
+                        "block_reason"
+                    )
+                )
+
+            daily_pnl += (
+                pnl_value
+            )
+
+            if pnl_value < 0:
+
+                consecutive_losses += 1
+
+            else:
+
+                consecutive_losses = 0
+
+            update = {
+
+                "date":
+                    today,
+
+                "daily_pnl_eur":
+                    daily_pnl,
+
+                "consecutive_losses":
+                    consecutive_losses,
+
+                "trading_blocked":
+                    trading_blocked,
+
+                "block_reason":
+                    block_reason,
+
+                "updated_at":
+                    now,
+            }
+
+            transaction.set(
+                risk_ref,
+                update,
+                merge=True,
+            )
+
+            return update
+
+        return record(
+            transaction
         )
-
-        if pnl_eur < 0:
-
-            consecutive_losses += 1
-
-        else:
-
-            consecutive_losses = 0
-
-        update = {
-            "date":
-                self._today(),
-
-            "daily_pnl_eur":
-                daily_pnl,
-
-            "consecutive_losses":
-                consecutive_losses,
-
-            "updated_at":
-                self._now(),
-        }
-
-        self._risk_ref().set(
-            update,
-            merge=True
-        )
-
-        return {
-            **risk,
-            **update,
-        }
 
     # ========================================================
     # BLOCCO TRADING
@@ -703,7 +1205,7 @@ class TradeState:
 
     def block_trading(
         self,
-        reason
+        reason,
     ):
 
         self._risk_ref().set(
@@ -719,11 +1221,11 @@ class TradeState:
                 "updated_at":
                     self._now(),
             },
-            merge=True
+            merge=True,
         )
 
     def unblock_trading(
-        self
+        self,
     ):
 
         self._risk_ref().set(
@@ -737,22 +1239,23 @@ class TradeState:
                 "updated_at":
                     self._now(),
             },
-            merge=True
+            merge=True,
         )
 
     # ========================================================
-    # IDEMPOTENZA CANDELA M15
+    # SIGNAL STATE
     # ========================================================
 
     def get_signal_state(
         self,
-        symbol
+        symbol,
     ):
 
         snapshot = (
             self._signal_ref(
                 symbol
-            ).get()
+            )
+            .get()
         )
 
         if not snapshot.exists:
@@ -769,7 +1272,7 @@ class TradeState:
 
     def get_last_processed_candle(
         self,
-        symbol
+        symbol,
     ):
 
         data = (
@@ -781,14 +1284,16 @@ class TradeState:
         if not data:
             return None
 
-        return data.get(
-            "last_processed_candle"
+        return (
+            data.get(
+                "last_processed_candle"
+            )
         )
 
     def is_candle_processed(
         self,
         symbol,
-        candle_id
+        candle_id,
     ):
 
         if candle_id is None:
@@ -802,11 +1307,12 @@ class TradeState:
 
         return (
             str(last_candle)
-            == str(candle_id)
+            ==
+            str(candle_id)
         )
 
     # ========================================================
-    # CLAIM ATOMICO DELLA CANDELA
+    # CLAIM ATOMICO CANDELA M15
     # ========================================================
 
     def claim_signal_candle(
@@ -815,16 +1321,6 @@ class TradeState:
         candle_id,
         action=None,
     ):
-        """
-        Tenta di registrare una candela come processata.
-
-        Ritorna:
-            True  -> questa esecuzione ha ottenuto la candela
-            False -> la candela era già stata processata
-
-        La transazione Firestore impedisce che due Cloud Run
-        simultanei possano processare la stessa candela M15.
-        """
 
         if candle_id is None:
 
@@ -832,12 +1328,16 @@ class TradeState:
                 "candle_id non può essere None"
             )
 
-        symbol = str(
-            symbol
-        ).upper().strip()
+        symbol = (
+            str(symbol)
+            .upper()
+            .strip()
+        )
 
-        candle_id = str(
-            candle_id
+        candle_id = (
+            str(
+                candle_id
+            )
         )
 
         document_ref = (
@@ -850,9 +1350,13 @@ class TradeState:
             self.db.transaction()
         )
 
+        now = (
+            self._now()
+        )
+
         @firestore.transactional
         def claim(
-            transaction
+            transaction,
         ):
 
             snapshot = (
@@ -876,12 +1380,14 @@ class TradeState:
 
                 if (
                     str(last_candle)
-                    == candle_id
+                    ==
+                    candle_id
                 ):
 
                     return False
 
             data = {
+
                 "symbol":
                     symbol,
 
@@ -892,16 +1398,16 @@ class TradeState:
                     action,
 
                 "processed_at":
-                    self._now(),
+                    now,
 
                 "updated_at":
-                    self._now(),
+                    now,
             }
 
             transaction.set(
                 document_ref,
                 data,
-                merge=True
+                merge=True,
             )
 
             return True
@@ -911,7 +1417,7 @@ class TradeState:
         )
 
     # ========================================================
-    # AGGIORNA RISULTATO ANALISI CANDELA
+    # RISULTATO ANALISI CANDELA
     # ========================================================
 
     def update_signal_result(
@@ -923,6 +1429,7 @@ class TradeState:
     ):
 
         data = {
+
             "last_processed_candle":
                 str(
                     candle_id
@@ -942,17 +1449,17 @@ class TradeState:
             symbol
         ).set(
             data,
-            merge=True
+            merge=True,
         )
 
     # ========================================================
-    # RESET IDEMPOTENZA
-    # Solo per test/manutenzione
+    # RESET SIGNAL STATE
+    # Solo test / manutenzione.
     # ========================================================
 
     def clear_signal_state(
         self,
-        symbol=None
+        symbol=None,
     ):
 
         if symbol is not None:
