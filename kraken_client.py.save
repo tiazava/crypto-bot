@@ -1,0 +1,45 @@
+import os
+import krakenex
+from dotenv import load_dotenv
+
+load_dotenv()
+
+class KrakenClient:
+    def __init__(self):
+        self.k = krakenex.API()
+        self.k.key = os.getenv("KRAKEN_API_KEY", "").strip()
+        self.k.secret = os.getenv("KRAKEN_SECRET_KEY", "").strip()
+
+    def get_account_balance(self):
+        if not self.k.key or not self.k.secret:
+            print("⚠️ Errore: KRAKEN_API_KEY o KRAKEN_SECRET_KEY mancanti nel file .env")
+            return 0.0
+
+        try:
+            res = self.k.query_private('Balance')
+            
+            if res.get('error'):
+                print(f"⚠️ Errore API Kraken: {res['error']}")
+                return 0.0
+
+            balances = res.get('result', {})
+            eur_val = float(balances.get('ZEUR', balances.get('EUR', 0.0)))
+            print(f"💰 Capitale Operativo Disponibile: {eur_val:.2f} EUR")
+            return eur_val
+
+        except Exception as e:
+            print(f"⚠️ Errore di connessione a Kraken: {e}")
+            return 0.0
+
+    def get_crypto_balance(self, asset="XXBT"):
+        """Recupera il saldo di una specifica criptovaluta (es. XXBT per Bitcoin, XETH per Ethereum)"""
+        try:
+            res = self.k.query_private('Balance')
+            if res.get('error'):
+                return 0.0
+            balances = res.get('result', {})
+            return float(balances.get(asset, 0.0))
+        except Exception:
+            return 0.0
+
+if __name__ ==
