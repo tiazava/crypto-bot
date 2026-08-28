@@ -799,7 +799,149 @@ def monitor_active_trade(
 
     return True
 
+# ============================================================
+# CONTROLLO LIMITI DI RISCHIO
+# ============================================================
 
+def check_risk_limits(
+    state,
+    operating_capital,
+):
+
+    risk = state.get_risk_state()
+
+    daily_pnl = float(
+        risk.get(
+            "daily_pnl_eur",
+            0.0
+        )
+    )
+
+    consecutive_losses = int(
+        risk.get(
+            "consecutive_losses",
+            0
+        )
+    )
+
+    already_blocked = bool(
+        risk.get(
+            "trading_blocked",
+            False
+        )
+    )
+
+    block_reason = risk.get(
+        "block_reason"
+    )
+
+    max_daily_loss_eur = (
+        operating_capital
+        * config.MAX_DAILY_LOSS
+    )
+
+    print("\nRISK CONTROL")
+
+    print(
+        f"P&L giornaliero: "
+        f"{daily_pnl:.2f} EUR"
+    )
+
+    print(
+        f"Perdita giornaliera massima: "
+        f"{max_daily_loss_eur:.2f} EUR"
+    )
+
+    print(
+        f"Perdite consecutive: "
+        f"{consecutive_losses}/"
+        f"{config.MAX_CONSECUTIVE_LOSSES}"
+    )
+
+    # --------------------------------------------------------
+    # PERDITA GIORNALIERA
+    # --------------------------------------------------------
+
+    if daily_pnl <= -max_daily_loss_eur:
+
+        reason = (
+            "Limite perdita giornaliera "
+            f"raggiunto: {daily_pnl:.2f} EUR"
+        )
+
+        if not already_blocked:
+
+            state.block_trading(
+                reason
+            )
+
+            send_telegram_message(
+                "🛑 CRYPTO BOT BLOCCATO\n\n"
+                "Limite perdita giornaliera "
+                "raggiunto.\n"
+                f"P&L oggi: {daily_pnl:.2f} EUR\n"
+                f"Limite: -{max_daily_loss_eur:.2f} EUR\n\n"
+                "Nessun nuovo trade fino "
+                "al prossimo giorno."
+            )
+
+        print(
+            f"TRADING BLOCCATO: {reason}"
+        )
+
+        return False
+
+    # --------------------------------------------------------
+    # 3 PERDITE CONSECUTIVE
+    # --------------------------------------------------------
+
+    if (
+        consecutive_losses
+        >= config.MAX_CONSECUTIVE_LOSSES
+    ):
+
+        reason = (
+            f"{consecutive_losses} "
+            "perdite consecutive"
+        )
+
+        if not already_blocked:
+
+            state.block_trading(
+                reason
+            )
+
+            send_telegram_message(
+                "🛑 CRYPTO BOT BLOCCATO\n\n"
+                f"{consecutive_losses} "
+                "trade consecutivi in perdita.\n\n"
+                "Nessun nuovo trade verrà aperto."
+            )
+
+        print(
+            f"TRADING BLOCCATO: {reason}"
+        )
+
+        return False
+
+    # --------------------------------------------------------
+    # BLOCCO GIÀ PRESENTE
+    # --------------------------------------------------------
+
+    if already_blocked:
+
+        print(
+            "TRADING BLOCCATO: "
+            f"{block_reason}"
+        )
+
+        return False
+
+    print(
+        "Risk control: OK"
+    )
+
+    return True
 # ============================================================
 # MAIN
 # ============================================================
