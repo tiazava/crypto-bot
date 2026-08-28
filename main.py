@@ -5,11 +5,8 @@ import config
 from kraken_client import KrakenClient
 from strategy import analyze_market
 from anthropic_guard import AnthropicGuard
+from telegram_notifier import notify_trade_open
 
-
-# ============================================================
-# POSITION SIZING
-# ============================================================
 
 def calculate_position_size(
     capital,
@@ -18,19 +15,6 @@ def calculate_position_size(
     stop_loss,
     min_notional
 ):
-    """
-    Dimensiona la posizione come percentuale del capitale.
-
-    BTC:
-    10% del capitale operativo
-
-    ETH:
-    8% del capitale operativo
-
-    Lo stop loss viene poi utilizzato per verificare
-    che il rischio monetario non superi RISK_PER_TRADE.
-    """
-
     if capital <= 0:
         return {
             "allowed": False,
@@ -43,9 +27,7 @@ def calculate_position_size(
             "reason": "Prezzo di ingresso non valido"
         }
 
-    stop_distance = abs(
-        entry - stop_loss
-    )
+    stop_distance = abs(entry - stop_loss)
 
     if stop_distance <= 0:
         return {
@@ -53,19 +35,9 @@ def calculate_position_size(
             "reason": "Stop loss non valido"
         }
 
-    # ========================================================
-    # CONTROVALORE POSIZIONE
-    # ========================================================
+    target_notional = capital * allocation_pct
 
-    target_notional = (
-        capital *
-        allocation_pct
-    )
-
-    # Il controvalore stabilito deve rispettare
-    # il minimo operativo dell'asset.
     if target_notional < min_notional:
-
         return {
             "allowed": False,
             "reason": (
@@ -76,35 +48,21 @@ def calculate_position_size(
             )
         }
 
-    # ========================================================
-    # QUANTITÀ
-    # ========================================================
+    quantity = target_notional / entry
 
-    quantity = (
-        target_notional /
-        entry
-    )
-
-    # ========================================================
-    # RISCHIO DELLO STOP
-    # ========================================================
-
-    actual_risk = (
-        quantity *
-        stop_distance
-    )
+    actual_risk = quantity * stop_distance
 
     max_risk = (
-        capital *
-        config.RISK_PER_TRADE
+        capital
+        * config.RISK_PER_TRADE
     )
 
     if actual_risk > max_risk:
-
         return {
             "allowed": False,
             "reason": (
-                f"Rischio SL {actual_risk:.2f} EUR "
+                f"Rischio SL "
+                f"{actual_risk:.2f} EUR "
                 f"superiore al massimo "
                 f"{max_risk:.2f} EUR"
             ),
@@ -122,37 +80,17 @@ def calculate_position_size(
     }
 
 
-# ============================================================
-# CONTROLLO POSIZIONI
-# ============================================================
-
 def has_open_position(kraken):
-    """
-    Controlla eventuali posizioni margin già aperte.
-    """
-
     positions = kraken.get_open_positions()
 
     return len(positions) > 0
 
 
-# ============================================================
-# CONTROLLO ORDINI
-# ============================================================
-
 def has_open_orders(kraken):
-    """
-    Evita duplicazioni se esistono ordini aperti.
-    """
-
     orders = kraken.get_open_orders()
 
     return len(orders) > 0
 
-
-# ============================================================
-# MAIN BOT
-# ============================================================
 
 def run():
 
@@ -194,7 +132,8 @@ def run():
 
             raise RuntimeError(
                 "LIVE richiesto ma "
-                "ALLOW_LIVE_TRADING non è true"
+                "ALLOW_LIVE_TRADING "
+                "non è true"
             )
 
     # ========================================================
@@ -230,10 +169,6 @@ def run():
 
         return
 
-    # ========================================================
-    # CAPITALE OPERATIVO
-    # ========================================================
-
     operating_capital = min(
         balance,
         config.CAPITAL_EUR
@@ -250,7 +185,7 @@ def run():
     )
 
     # ========================================================
-    # POSIZIONI / ORDINI APERTI
+    # CONTROLLO POSIZIONI / ORDINI
     # ========================================================
 
     try:
@@ -282,13 +217,14 @@ def run():
     except Exception as e:
 
         print(
-            f"ERRORE CONTROLLO POSIZIONI: {e}"
+            f"ERRORE CONTROLLO "
+            f"POSIZIONI: {e}"
         )
 
         return
 
     # ========================================================
-    # ANTHROPIC
+    # AI GUARD
     # ========================================================
 
     try:
@@ -298,32 +234,35 @@ def run():
     except Exception as e:
 
         print(
-            f"ERRORE INIZIALIZZAZIONE AI: {e}"
+            f"ERRORE "
+            f"INIZIALIZZAZIONE AI: {e}"
         )
 
         return
 
     # ========================================================
-    # CICLO ASSET
+    # ANALISI ASSET
     # ========================================================
 
     for symbol, pair_info in config.PAIRS.items():
 
-        pair = pair_info[
-            "pair"
-        ]
+        pair = pair_info["pair"]
 
-        min_notional = pair_info[
-            "min_notional_eur"
-        ]
+        min_notional = (
+            pair_info[
+                "min_notional_eur"
+            ]
+        )
 
-        allocation_pct = pair_info[
-            "allocation_pct"
-        ]
+        allocation_pct = (
+            pair_info[
+                "allocation_pct"
+            ]
+        )
 
         target_notional = (
-            operating_capital *
-            allocation_pct
+            operating_capital
+            * allocation_pct
         )
 
         print(
@@ -349,7 +288,7 @@ def run():
         )
 
         # ====================================================
-        # DATI H4 / H1 / M15
+        # DOWNLOAD DATI
         # ====================================================
 
         try:
@@ -446,7 +385,7 @@ def run():
         )
 
         # ====================================================
-        # HOLD
+        # NESSUN SEGNALE
         # ====================================================
 
         if analysis.get(
@@ -462,39 +401,32 @@ def run():
 
             continue
 
+        # ====================================================
+        # SEGNALE VALIDO
+        # ====================================================
+
         side = analysis[
             "action"
         ]
 
         entry = float(
-            analysis[
-                "price"
-            ]
+            analysis["price"]
         )
 
         stop_loss = float(
-            analysis[
-                "stop_loss"
-            ]
+            analysis["stop_loss"]
         )
 
         take_profit = float(
-            analysis[
-                "take_profit"
-            ]
+            analysis["take_profit"]
         )
-
-        # ====================================================
-        # SEGNALE
-        # ====================================================
 
         print(
             f"SEGNALE {side} {symbol}"
         )
 
         print(
-            f"Entry: "
-            f"{entry:.2f}"
+            f"Entry: {entry:.2f}"
         )
 
         print(
@@ -536,12 +468,14 @@ def run():
         # POSITION SIZING
         # ====================================================
 
-        sizing = calculate_position_size(
-            capital=operating_capital,
-            allocation_pct=allocation_pct,
-            entry=entry,
-            stop_loss=stop_loss,
-            min_notional=min_notional
+        sizing = (
+            calculate_position_size(
+                capital=operating_capital,
+                allocation_pct=allocation_pct,
+                entry=entry,
+                stop_loss=stop_loss,
+                min_notional=min_notional
+            )
         )
 
         if not sizing[
@@ -555,21 +489,21 @@ def run():
 
             continue
 
-        quantity = sizing[
-            "quantity"
-        ]
+        quantity = (
+            sizing["quantity"]
+        )
 
-        notional = sizing[
-            "notional"
-        ]
+        notional = (
+            sizing["notional"]
+        )
 
-        actual_risk = sizing[
-            "actual_risk"
-        ]
+        actual_risk = (
+            sizing["actual_risk"]
+        )
 
-        max_risk = sizing[
-            "max_risk"
-        ]
+        max_risk = (
+            sizing["max_risk"]
+        )
 
         print(
             f"Quantità: "
@@ -592,7 +526,7 @@ def run():
         )
 
         # ====================================================
-        # AI GUARD
+        # DATI PER AI GUARD
         # ====================================================
 
         technical_data = {
@@ -607,9 +541,7 @@ def run():
                 take_profit,
 
             "atr":
-                analysis.get(
-                    "atr"
-                ),
+                analysis.get("atr"),
 
             "atr_ratio":
                 analysis.get(
@@ -622,14 +554,10 @@ def run():
                 ),
 
             "rsi":
-                analysis.get(
-                    "rsi"
-                ),
+                analysis.get("rsi"),
 
             "adx":
-                analysis.get(
-                    "adx"
-                ),
+                analysis.get("adx"),
 
             "h4_trend":
                 analysis.get(
@@ -657,18 +585,33 @@ def run():
                 ),
         }
 
+        # ====================================================
+        # AI GUARD
+        # ====================================================
+
         print(
             "Controllo AI Guard..."
         )
 
-        ai_result = (
-            guard.evaluate_market_risk(
-                asset=symbol,
-                side=side,
-                current_price=entry,
-                technical_data=technical_data
+        try:
+
+            ai_result = (
+                guard.evaluate_market_risk(
+                    asset=symbol,
+                    side=side,
+                    current_price=entry,
+                    technical_data=
+                    technical_data
+                )
             )
-        )
+
+        except Exception as e:
+
+            print(
+                f"ERRORE AI GUARD: {e}"
+            )
+
+            continue
 
         print(
             f"AI decision: "
@@ -683,7 +626,8 @@ def run():
         if (
             ai_result[
                 "decision"
-            ] != "GO"
+            ]
+            != "GO"
         ):
 
             print(
@@ -694,7 +638,7 @@ def run():
             continue
 
         # ====================================================
-        # PAPER MODE
+        # PAPER TRADING
         # ====================================================
 
         if (
@@ -748,7 +692,7 @@ def run():
             continue
 
         # ====================================================
-        # LIVE MODE
+        # LEVA
         # ====================================================
 
         if symbol == "BTC":
@@ -763,13 +707,16 @@ def run():
                 config.LEVERAGE_ETH
             )
 
+        # ====================================================
+        # LIVE TRADING
+        # ====================================================
+
         print(
             "\nLIVE TRADING"
         )
 
         print(
-            f"Invio {side} "
-            f"{symbol}"
+            f"Invio {side} {symbol}"
         )
 
         try:
@@ -795,15 +742,40 @@ def run():
         except Exception as e:
 
             print(
-                f"ORDINE FALLITO: "
-                f"{e}"
+                f"ORDINE FALLITO: {e}"
             )
 
             continue
 
+        # ====================================================
+        # TELEGRAM - APERTURA ORDINE
+        # ====================================================
+
+        try:
+
+            notify_trade_open(
+                symbol=symbol,
+                side=side,
+                entry=entry,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                notional=notional,
+                risk=actual_risk
+            )
+
+        except Exception as e:
+
+            # Un errore Telegram NON deve
+            # compromettere il trade già eseguito.
+            print(
+                f"ERRORE NOTIFICA "
+                f"TELEGRAM: {e}"
+            )
+
         # Dopo un ordine LIVE
-        # nessun altro asset viene aperto
-        # nello stesso ciclo.
+        # non apriamo altri trade
+        # nella stessa esecuzione.
+
         break
 
     print(
@@ -818,10 +790,6 @@ def run():
         "=" * 60
     )
 
-
-# ============================================================
-# START
-# ============================================================
 
 if __name__ == "__main__":
     run()
