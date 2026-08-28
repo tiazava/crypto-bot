@@ -1,77 +1,342 @@
 import os
+import time
+
 import pandas as pd
 import krakenex
 from dotenv import load_dotenv
 
 load_dotenv()
 
+
 class KrakenClient:
+
     def __init__(self):
+
         self.k = krakenex.API()
-        self.k.key = os.getenv("KRAKEN_API_KEY", "").strip()
-        self.k.secret = os.getenv("KRAKEN_SECRET_KEY", "").strip()
+
+        self.k.key = os.getenv(
+            "KRAKEN_API_KEY",
+            ""
+        ).strip()
+
+        self.k.secret = os.getenv(
+            "KRAKEN_SECRET_KEY",
+            ""
+        ).strip()
+
+
+    # ========================================================
+    # GENERIC REQUEST
+    # ========================================================
+
+    def _check_credentials(self):
+
+        if not self.k.key or not self.k.secret:
+
+            raise RuntimeError(
+                "KRAKEN_API_KEY o KRAKEN_SECRET_KEY mancanti"
+            )
+
+
+    # ========================================================
+    # BALANCE
+    # ========================================================
 
     def get_account_balance(self):
-        """Recupera il saldo in Euro disponibile"""
-        if not self.k.key or not self.k.secret:
-            print("⚠️ Errore: KRAKEN_API_KEY o KRAKEN_SECRET_KEY mancanti nel file .env")
-            return 0.0
 
-        try:
-            res = self.k.query_private('Balance')
-            if res.get('error'):
-                print(f"⚠️ Errore API Kraken: {res['error']}")
-                return 0.0
+        self._check_credentials()
 
-            balances = res.get('result', {})
-            eur_val = float(balances.get('ZEUR', balances.get('EUR', 0.0)))
-            return eur_val
+        response = self.k.query_private(
+            "Balance"
+        )
 
-        except Exception as e:
-            print(f"⚠️ Errore di connessione a Kraken: {e}")
-            return 0.0
+        if response.get("error"):
 
-    def get_crypto_balance(self, asset="XXBT"):
-        """Recupera il saldo di una specifica criptovaluta"""
-        try:
-            res = self.k.query_private('Balance')
-            if res.get('error'):
-                return 0.0
-            balances = res.get('result', {})
-            return float(balances.get(asset, 0.0))
-        except Exception:
-            return 0.0
+            raise RuntimeError(
+                f"Kraken Balance error: "
+                f"{response['error']}"
+            )
 
-    def get_daily_ohlc(self, pair="XXBTZEUR", interval=1440):
-        """Scarica i dati storici delle candele (OHLC) per l'analisi tecnica"""
-        try:
-            res = self.k.query_public('OHLC', {'pair': pair, 'interval': interval})
-            if res.get('error'):
-                print(f"⚠️ Errore recupero dati OHLC per {pair}: {res['error']}")
-                return pd.DataFrame()
+        balances = response.get(
+            "result",
+            {}
+        )
 
-            result = res.get('result', {})
-            data_key = [k for k in result.keys() if k != 'last']
-            if not data_key:
-                return pd.DataFrame()
+        return float(
+            balances.get(
+                "ZEUR",
+                balances.get("EUR", 0.0)
+            )
+        )
 
-            raw_data = result[data_key[0]]
-            
-            df = pd.DataFrame(raw_data, columns=[
-                'time', 'open', 'high', 'low', 'close', 'vwap', 'volume', 'count'
-            ])
-            
-            for col in ['open', 'high', 'low', 'close', 'volume']:
-                df[col] = df[col].astype(float)
 
-            df['time'] = pd.to_datetime(df['time'], unit='s')
-            return df
+    # ========================================================
+    # OHLC
+    # ========================================================
 
-        except Exception as e:
-            print(f"⚠️ Errore durante il download dei dati OHLC: {e}")
+    def get_ohlc(
+        self,
+        pair,
+        interval
+    ):
+
+        response = self.k.query_public(
+            "OHLC",
+            {
+                "pair": pair,
+                "interval": interval
+            }
+        )
+
+        if response.get("error"):
+
+            raise RuntimeError(
+                f"Kraken OHLC error: "
+                f"{response['error']}"
+            )
+
+        result = response.get(
+            "result",
+            {}
+        )
+
+        data_keys = [
+            key
+            for key in result.keys()
+            if key != "last"
+        ]
+
+        if not data_keys:
             return pd.DataFrame()
 
-if __name__ == "__main__":
-    client = KrakenClient()
-    saldo = client.get_account_balance()
-    print(f"💰 Saldo confermato: {saldo:.2f} EUR")
+        raw = result[data_keys[0]]
+
+        df = pd.DataFrame(
+            raw,
+            columns=[
+                "time",
+                "open",
+                "high",
+                "low",
+                "close",
+                "vwap",
+                "volume",
+                "count",
+            ]
+        )
+
+        numeric = [
+            "open",
+            "high",
+            "low",
+            "close",
+            "vwap",
+            "volume",
+        ]
+
+        for column in numeric:
+
+            df[column] = pd.to_numeric(
+                df[column],
+                errors="coerce"
+            )
+
+        df["time"] = pd.to_datetime(
+            df["time"],
+            unit="s",
+            utc=True
+        )
+
+        # Eliminiamo l'ultima candela perché
+        # può essere ancora in formazione.
+        if len(df) > 1:
+
+            df = df.iloc[:-1].copy()
+
+        return df
+
+
+    # ========================================================
+    # OPEN ORDERS
+    # ========================================================
+
+    def get_open_orders(self):
+
+        self._check_credentials()
+
+        response = self.k.query_private(
+            "OpenOrders"
+        )
+
+        if response.get("error"):
+
+            raise RuntimeError(
+                f"Kraken OpenOrders error: "
+                f"{response['error']}"
+            )
+
+        return response.get(
+            "result",
+            {}
+        ).get(
+            "open",
+            {}
+        )
+
+
+    # ========================================================
+    # OPEN POSITIONS
+    # ========================================================
+
+    def get_open_positions(self):
+
+        self._check_credentials()
+
+        response = self.k.query_private(
+            "OpenPositions"
+        )
+
+        if response.get("error"):
+
+            raise RuntimeError(
+                f"Kraken OpenPositions error: "
+                f"{response['error']}"
+            )
+
+        return response.get(
+            "result",
+            {}
+        )
+
+
+    # ========================================================
+    # TICKER
+    # ========================================================
+
+    def get_ticker(self, pair):
+
+        response = self.k.query_public(
+            "Ticker",
+            {
+                "pair": pair
+            }
+        )
+
+        if response.get("error"):
+
+            raise RuntimeError(
+                f"Kraken Ticker error: "
+                f"{response['error']}"
+            )
+
+        result = response.get(
+            "result",
+            {}
+        )
+
+        key = next(
+            (
+                x
+                for x in result.keys()
+                if x != "last"
+            ),
+            None
+        )
+
+        if not key:
+
+            raise RuntimeError(
+                "Ticker Kraken non trovato"
+            )
+
+        return float(
+            result[key]["c"][0]
+        )
+
+
+    # ========================================================
+    # MARKET ORDER
+    # ========================================================
+
+    def create_market_order(
+        self,
+        pair,
+        side,
+        volume,
+        leverage=None
+    ):
+
+        self._check_credentials()
+
+        data = {
+            "pair": pair,
+            "type": side.lower(),
+            "ordertype": "market",
+            "volume": f"{volume:.8f}",
+        }
+
+        if leverage and leverage > 1:
+
+            data["leverage"] = str(
+                leverage
+            )
+
+        print(
+            f"📤 ORDINE KRAKEN: {data}"
+        )
+
+        response = self.k.query_private(
+            "AddOrder",
+            data
+        )
+
+        if response.get("error"):
+
+            raise RuntimeError(
+                f"Kraken AddOrder error: "
+                f"{response['error']}"
+            )
+
+        return response.get(
+            "result",
+            {}
+        )
+
+
+    # ========================================================
+    # CANCEL ORDER
+    # ========================================================
+
+    def cancel_order(self, txid):
+
+        self._check_credentials()
+
+        response = self.k.query_private(
+            "CancelOrder",
+            {
+                "txid": txid
+            }
+        )
+
+        if response.get("error"):
+
+            raise RuntimeError(
+                f"Kraken CancelOrder error: "
+                f"{response['error']}"
+            )
+
+        return response
+
+
+    # ========================================================
+    # API KEY TEST
+    # ========================================================
+
+    def test_connection(self):
+
+        balance = self.get_account_balance()
+
+        return {
+            "connected": True,
+            "balance_eur": balance
+        }
