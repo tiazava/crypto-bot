@@ -10,11 +10,8 @@ on:
       - main
 
 jobs:
-
   test:
-
     name: Test Crypto Bot
-
     runs-on: ubuntu-latest
 
     steps:
@@ -37,27 +34,20 @@ jobs:
         run: |
           python -m compileall .
 
+      - name: Check imports
+        env:
+          TRADING_MODE: PAPER
+          ALLOW_LIVE_TRADING: "false"
+        run: |
+          python -c "import config"
+          python -c "import strategy"
+          python -c "import kraken_client"
+          python -c "import anthropic_guard"
+          python -c "import main"
+
       - name: Run tests
         env:
           TRADING_MODE: PAPER
           ALLOW_LIVE_TRADING: "false"
         run: |
-          if ls test_*.py >/dev/null 2>&1; then
-
-            python -m pytest -q
-            code=$?
-
-            if [ "$code" -eq 5 ]; then
-              echo "Nessun test pytest valido trovato."
-              echo "Il controllo sintattico è comunque passato correttamente."
-              exit 0
-            fi
-
-            exit "$code"
-
-          else
-
-            echo "Nessun file test_*.py trovato."
-            exit 0
-
-          fi
+          python -m pytest -q || [ $? -eq 5 ]
