@@ -17,6 +17,25 @@ from telegram_notifier import (
 
 
 # ============================================================
+# TELEGRAM SICURO
+# Un errore Telegram NON deve interrompere la gestione trade.
+# ============================================================
+
+def safe_telegram(message):
+
+    try:
+        send_telegram_message(
+            message
+        )
+
+    except Exception as e:
+
+        print(
+            f"ERRORE TELEGRAM: {e}"
+        )
+
+
+# ============================================================
 # POSITION SIZING
 # ============================================================
 
@@ -27,13 +46,16 @@ def calculate_position_size(
     stop_loss,
     min_notional,
 ):
+
     if capital <= 0:
+
         return {
             "allowed": False,
             "reason": "Capitale operativo non valido",
         }
 
     if entry <= 0:
+
         return {
             "allowed": False,
             "reason": "Prezzo di ingresso non valido",
@@ -44,16 +66,22 @@ def calculate_position_size(
     )
 
     if stop_distance <= 0:
+
         return {
             "allowed": False,
-            "reason": "Stop loss non valido",
+            "reason": "Stop Loss non valido",
         }
 
     target_notional = (
-        capital * allocation_pct
+        capital
+        * allocation_pct
     )
 
-    if target_notional < min_notional:
+    if (
+        target_notional
+        < min_notional
+    ):
+
         return {
             "allowed": False,
             "reason": (
@@ -65,11 +93,13 @@ def calculate_position_size(
         }
 
     quantity = (
-        target_notional / entry
+        target_notional
+        / entry
     )
 
     actual_risk = (
-        quantity * stop_distance
+        quantity
+        * stop_distance
     )
 
     max_risk = (
@@ -78,6 +108,7 @@ def calculate_position_size(
     )
 
     if actual_risk > max_risk:
+
         return {
             "allowed": False,
             "reason": (
@@ -101,7 +132,9 @@ def calculate_position_size(
 # TXID
 # ============================================================
 
-def extract_txid(result):
+def extract_txid(
+    result
+):
 
     if not result:
         return None
@@ -121,7 +154,9 @@ def extract_txid(result):
 # INFO ORDINE
 # ============================================================
 
-def order_is_filled(order):
+def order_is_filled(
+    order
+):
 
     if not order:
         return False
@@ -148,7 +183,8 @@ def order_is_filled(order):
 
     return (
         status == "closed"
-        and vol_exec > 0
+        and
+        vol_exec > 0
     )
 
 
@@ -202,13 +238,55 @@ def get_filled_volume(
     )
 
 
+def get_order_fee(
+    order
+):
+
+    try:
+
+        return float(
+            order.get(
+                "fee",
+                0
+            )
+        )
+
+    except Exception:
+
+        return 0.0
+
+
+def get_order_close_time(
+    order
+):
+
+    try:
+
+        return float(
+            order.get(
+                "closetm",
+                0
+            )
+        )
+
+    except Exception:
+
+        return 0.0
+
+
 # ============================================================
 # IDENTIFICATIVO CANDELA M15
 # ============================================================
 
-def get_candle_id(df):
+def get_candle_id(
+    df
+):
 
-    if df is None or df.empty:
+    if (
+        df is None
+        or df.empty
+    ):
+
         return None
 
     try:
@@ -221,7 +299,10 @@ def get_candle_id(df):
             value,
             "isoformat"
         ):
-            return value.isoformat()
+
+            return (
+                value.isoformat()
+            )
 
         return str(
             value
@@ -241,7 +322,7 @@ def get_candle_id(df):
 
 
 # ============================================================
-# PNL
+# PNL LORDO
 # ============================================================
 
 def calculate_pnl(
@@ -251,7 +332,10 @@ def calculate_pnl(
     volume,
 ):
 
-    if side.upper() == "BUY":
+    if (
+        side.upper()
+        == "BUY"
+    ):
 
         pnl = (
             exit_price - entry
@@ -266,6 +350,65 @@ def calculate_pnl(
     return float(
         pnl
     )
+
+
+# ============================================================
+# PNL NETTO COMMISSIONI
+# ============================================================
+
+def calculate_net_pnl(
+    side,
+    entry,
+    exit_price,
+    volume,
+    entry_fee=0.0,
+    exit_fee=0.0,
+):
+
+    gross_pnl = (
+        calculate_pnl(
+            side=
+                side,
+
+            entry=
+                entry,
+
+            exit_price=
+                exit_price,
+
+            volume=
+                volume,
+        )
+    )
+
+    total_fees = (
+        float(entry_fee)
+        +
+        float(exit_fee)
+    )
+
+    net_pnl = (
+        gross_pnl
+        -
+        total_fees
+    )
+
+    return {
+        "gross_pnl":
+            float(
+                gross_pnl
+            ),
+
+        "fees":
+            float(
+                total_fees
+            ),
+
+        "net_pnl":
+            float(
+                net_pnl
+            ),
+    }
 
 
 # ============================================================
@@ -293,13 +436,57 @@ def safe_cancel(
     except Exception as e:
 
         print(
-            f"Impossibile cancellare "
+            "Impossibile cancellare "
             f"{txid}: {e}"
         )
 
 
 # ============================================================
-# CONTROLLO LIMITI DI RISCHIO
+# RICONCILIA ORDINE CON CLIENT ORDER ID
+# ============================================================
+
+def recover_order_by_client_id(
+    kraken,
+    client_order_id
+):
+
+    if not client_order_id:
+        return None
+
+    try:
+
+        recovered = (
+            kraken
+            .find_order_by_client_order_id(
+                client_order_id
+            )
+        )
+
+    except Exception as e:
+
+        print(
+            "Errore ricerca cl_ord_id "
+            f"{client_order_id}: {e}"
+        )
+
+        return None
+
+    if not recovered:
+
+        return None
+
+    print(
+        "ORDINE RECUPERATO DA KRAKEN "
+        f"cl_ord_id={client_order_id} "
+        f"txid={recovered.get('txid')} "
+        f"source={recovered.get('source')}"
+    )
+
+    return recovered
+
+
+# ============================================================
+# CONTROLLO LIMITI RISCHIO
 # ============================================================
 
 def check_risk_limits(
@@ -332,8 +519,10 @@ def check_risk_limits(
         )
     )
 
-    block_reason = risk.get(
-        "block_reason"
+    block_reason = (
+        risk.get(
+            "block_reason"
+        )
     )
 
     max_daily_loss_eur = (
@@ -362,14 +551,18 @@ def check_risk_limits(
     )
 
     # ========================================================
-    # PERDITA GIORNALIERA
+    # MAX DAILY LOSS
     # ========================================================
 
-    if daily_pnl <= -max_daily_loss_eur:
+    if (
+        daily_pnl
+        <= -max_daily_loss_eur
+    ):
 
         reason = (
             "Limite perdita giornaliera "
-            f"raggiunto: {daily_pnl:.2f} EUR"
+            f"raggiunto: "
+            f"{daily_pnl:.2f} EUR"
         )
 
         if not already_blocked:
@@ -378,24 +571,27 @@ def check_risk_limits(
                 reason
             )
 
-            send_telegram_message(
+            safe_telegram(
                 "🛑 CRYPTO BOT BLOCCATO\n\n"
                 "Limite perdita giornaliera "
                 "raggiunto.\n"
-                f"P&L oggi: {daily_pnl:.2f} EUR\n"
-                f"Limite: -{max_daily_loss_eur:.2f} EUR\n\n"
-                "Nessun nuovo trade fino "
-                "al prossimo giorno."
+                f"P&L oggi: "
+                f"{daily_pnl:.2f} EUR\n"
+                f"Limite: "
+                f"-{max_daily_loss_eur:.2f} EUR\n\n"
+                "Nessun nuovo trade "
+                "fino al prossimo giorno."
             )
 
         print(
-            f"TRADING BLOCCATO: {reason}"
+            f"TRADING BLOCCATO: "
+            f"{reason}"
         )
 
         return False
 
     # ========================================================
-    # PERDITE CONSECUTIVE
+    # MAX PERDITE CONSECUTIVE
     # ========================================================
 
     if (
@@ -414,15 +610,18 @@ def check_risk_limits(
                 reason
             )
 
-            send_telegram_message(
+            safe_telegram(
                 "🛑 CRYPTO BOT BLOCCATO\n\n"
                 f"{consecutive_losses} "
-                "trade consecutivi in perdita.\n\n"
-                "Nessun nuovo trade verrà aperto."
+                "trade consecutivi "
+                "in perdita.\n\n"
+                "Nessun nuovo trade "
+                "verrà aperto."
             )
 
         print(
-            f"TRADING BLOCCATO: {reason}"
+            f"TRADING BLOCCATO: "
+            f"{reason}"
         )
 
         return False
@@ -445,6 +644,97 @@ def check_risk_limits(
     )
 
     return True
+
+
+# ============================================================
+# RECUPERO ENTRY DOPO CRASH
+# ============================================================
+
+def recover_pending_entry(
+    kraken,
+    state,
+    trade
+):
+
+    entry_txid = (
+        trade.get(
+            "entry_txid"
+        )
+    )
+
+    if entry_txid:
+
+        return {
+            "txid":
+                entry_txid,
+
+            "order":
+                None,
+        }
+
+    client_order_id = (
+        trade.get(
+            "entry_client_order_id"
+        )
+    )
+
+    if not client_order_id:
+
+        print(
+            "ERRORE CRITICO: "
+            "ENTRY_PENDING senza TXID "
+            "e senza client_order_id."
+        )
+
+        safe_telegram(
+            "🚨 ATTENZIONE CRYPTO BOT\n\n"
+            "Trade ENTRY_PENDING senza "
+            "TXID e senza client order ID.\n"
+            "Nessun nuovo ordine verrà aperto."
+        )
+
+        return None
+
+    recovered = (
+        recover_order_by_client_id(
+            kraken,
+            client_order_id
+        )
+    )
+
+    if not recovered:
+
+        print(
+            "Entry non ancora trovata "
+            "su Kraken tramite cl_ord_id. "
+            "Nessun nuovo ordine verrà inviato."
+        )
+
+        return None
+
+    entry_txid = (
+        recovered[
+            "txid"
+        ]
+    )
+
+    state.set_entry_order(
+        txid=
+            entry_txid,
+
+        client_order_id=
+            client_order_id,
+    )
+
+    return {
+        "txid":
+            entry_txid,
+
+        "order":
+            recovered.get(
+                "order"
+            ),
+    }
 
 
 # ============================================================
@@ -483,32 +773,56 @@ def monitor_active_trade(
 
     if status == "ENTRY_PENDING":
 
-        entry_txid = (
-            trade.get(
-                "entry_txid"
+        recovery = (
+            recover_pending_entry(
+                kraken,
+                state,
+                trade,
             )
         )
 
-        if not entry_txid:
-
-            print(
-                "Entry TXID non ancora presente."
-            )
+        if not recovery:
 
             return True
 
+        entry_txid = (
+            recovery[
+                "txid"
+            ]
+        )
+
         order = (
-            kraken.get_order_info(
-                entry_txid
+            recovery.get(
+                "order"
             )
         )
+
+        if not order:
+
+            try:
+
+                order = (
+                    kraken.get_order_info(
+                        entry_txid
+                    )
+                )
+
+            except Exception as e:
+
+                print(
+                    "Errore verifica entry: "
+                    f"{e}"
+                )
+
+                return True
 
         if not order_is_filled(
             order
         ):
 
             print(
-                "Entry non ancora eseguita."
+                "Entry presente su Kraken "
+                "ma non ancora eseguita."
             )
 
             return True
@@ -533,10 +847,10 @@ def monitor_active_trade(
 
         state.mark_entry_filled(
             fill_price=
-            fill_price,
+                fill_price,
 
             filled_volume=
-            filled_volume,
+                filled_volume,
         )
 
         trade = (
@@ -547,8 +861,13 @@ def monitor_active_trade(
             "ENTRY_FILLED"
         )
 
+        print(
+            "Entry eseguita e "
+            "registrata in Firestore."
+        )
+
     # ========================================================
-    # CREA PROTEZIONI
+    # ENTRY FILLED / PROTECTION PENDING
     # ========================================================
 
     if status in {
@@ -557,40 +876,54 @@ def monitor_active_trade(
     }:
 
         pair = (
-            trade["pair"]
+            trade[
+                "pair"
+            ]
         )
 
         side = (
-            trade["side"]
+            trade[
+                "side"
+            ]
         )
 
         volume = (
             trade.get(
                 "entry_filled_volume"
             )
+            or
+            trade[
+                "requested_volume"
+            ]
         )
 
-        if not volume:
-
-            volume = (
-                trade[
-                    "requested_volume"
-                ]
-            )
-
         leverage = (
-            trade["leverage"]
+            trade[
+                "leverage"
+            ]
         )
 
         stop_loss = (
-            trade["stop_loss"]
+            trade[
+                "stop_loss"
+            ]
         )
 
         take_profit = (
-            trade["take_profit"]
+            trade[
+                "take_profit"
+            ]
         )
 
         state.mark_protection_pending()
+
+        trade = (
+            state.get_active_trade()
+        )
+
+        # ====================================================
+        # STOP LOSS
+        # ====================================================
 
         stop_txid = (
             trade.get(
@@ -598,31 +931,84 @@ def monitor_active_trade(
             )
         )
 
-        tp_txid = (
+        stop_client_id = (
             trade.get(
-                "take_profit_txid"
+                "stop_client_order_id"
             )
         )
 
-        try:
+        if (
+            not stop_txid
+            and stop_client_id
+        ):
 
-            # =================================================
-            # STOP LOSS
-            # =================================================
+            recovered_stop = (
+                recover_order_by_client_id(
+                    kraken,
+                    stop_client_id
+                )
+            )
 
-            if not stop_txid:
+            if recovered_stop:
+
+                stop_txid = (
+                    recovered_stop[
+                        "txid"
+                    ]
+                )
+
+                state.set_stop_order(
+                    txid=
+                        stop_txid,
+
+                    client_order_id=
+                        stop_client_id,
+                )
+
+        if not stop_txid:
+
+            if not stop_client_id:
+
+                stop_client_id = (
+                    kraken.generate_client_order_id(
+                        "stop"
+                    )
+                )
+
+                # Salviamo PRIMA dell'AddOrder.
+                state.set_stop_order(
+                    txid=None,
+                    client_order_id=
+                        stop_client_id,
+                )
+
+            try:
 
                 stop_result = (
                     kraken.create_stop_loss_order(
-                        pair=pair,
-                        entry_side=side,
-                        volume=volume,
+                        pair=
+                            pair,
+
+                        entry_side=
+                            side,
+
+                        volume=
+                            volume,
+
                         stop_price=
-                        stop_loss,
+                            stop_loss,
+
                         leverage=
-                        leverage,
-                        validate=False,
-                        reduce_only=True,
+                            leverage,
+
+                        validate=
+                            False,
+
+                        reduce_only=
+                            True,
+
+                        client_order_id=
+                            stop_client_id,
                     )
                 )
 
@@ -640,26 +1026,158 @@ def monitor_active_trade(
                     )
 
                 state.set_stop_order(
-                    stop_txid
+                    txid=
+                        stop_txid,
+
+                    client_order_id=
+                        stop_client_id,
                 )
 
-            # =================================================
-            # TAKE PROFIT
-            # =================================================
+            except Exception as e:
 
-            if not tp_txid:
+                print(
+                    "Errore invio Stop Loss: "
+                    f"{e}"
+                )
+
+                # Potrebbe essere stato accettato
+                # nonostante un errore di rete.
+                recovered_stop = (
+                    recover_order_by_client_id(
+                        kraken,
+                        stop_client_id
+                    )
+                )
+
+                if recovered_stop:
+
+                    stop_txid = (
+                        recovered_stop[
+                            "txid"
+                        ]
+                    )
+
+                    state.set_stop_order(
+                        txid=
+                            stop_txid,
+
+                        client_order_id=
+                            stop_client_id,
+                    )
+
+                else:
+
+                    safe_telegram(
+                        "🚨 ERRORE STOP LOSS\n\n"
+                        f"{trade['symbol']} "
+                        f"{side}\n"
+                        "Stop Loss non confermato "
+                        "su Kraken.\n"
+                        "Avvio chiusura "
+                        "di emergenza."
+                    )
+
+                    return (
+                        emergency_close_trade(
+                            kraken,
+                            state,
+                            trade,
+                        )
+                    )
+
+        # ====================================================
+        # TAKE PROFIT
+        # ====================================================
+
+        trade = (
+            state.get_active_trade()
+        )
+
+        tp_txid = (
+            trade.get(
+                "take_profit_txid"
+            )
+        )
+
+        tp_client_id = (
+            trade.get(
+                "take_profit_client_order_id"
+            )
+        )
+
+        if (
+            not tp_txid
+            and tp_client_id
+        ):
+
+            recovered_tp = (
+                recover_order_by_client_id(
+                    kraken,
+                    tp_client_id
+                )
+            )
+
+            if recovered_tp:
+
+                tp_txid = (
+                    recovered_tp[
+                        "txid"
+                    ]
+                )
+
+                state.set_take_profit_order(
+                    txid=
+                        tp_txid,
+
+                    client_order_id=
+                        tp_client_id,
+                )
+
+        if not tp_txid:
+
+            if not tp_client_id:
+
+                tp_client_id = (
+                    kraken.generate_client_order_id(
+                        "take_profit"
+                    )
+                )
+
+                # Anche TP viene salvato
+                # PRIMA di Kraken.
+                state.set_take_profit_order(
+                    txid=None,
+                    client_order_id=
+                        tp_client_id,
+                )
+
+            try:
 
                 tp_result = (
                     kraken.create_take_profit_order(
-                        pair=pair,
-                        entry_side=side,
-                        volume=volume,
+                        pair=
+                            pair,
+
+                        entry_side=
+                            side,
+
+                        volume=
+                            volume,
+
                         take_profit_price=
-                        take_profit,
+                            take_profit,
+
                         leverage=
-                        leverage,
-                        validate=False,
-                        reduce_only=True,
+                            leverage,
+
+                        validate=
+                            False,
+
+                        reduce_only=
+                            True,
+
+                        client_order_id=
+                            tp_client_id,
                     )
                 )
 
@@ -677,190 +1195,157 @@ def monitor_active_trade(
                     )
 
                 state.set_take_profit_order(
-                    tp_txid
+                    txid=
+                        tp_txid,
+
+                    client_order_id=
+                        tp_client_id,
                 )
 
-            state.mark_protected()
+            except Exception as e:
 
-            trade = (
-                state.get_active_trade()
+                print(
+                    "Errore invio Take Profit: "
+                    f"{e}"
+                )
+
+                recovered_tp = (
+                    recover_order_by_client_id(
+                        kraken,
+                        tp_client_id
+                    )
+                )
+
+                if recovered_tp:
+
+                    tp_txid = (
+                        recovered_tp[
+                            "txid"
+                        ]
+                    )
+
+                    state.set_take_profit_order(
+                        txid=
+                            tp_txid,
+
+                        client_order_id=
+                            tp_client_id,
+                    )
+
+                else:
+
+                    safe_telegram(
+                        "🚨 ERRORE TAKE PROFIT\n\n"
+                        f"{trade['symbol']} "
+                        f"{side}\n"
+                        "Take Profit non confermato "
+                        "su Kraken.\n"
+                        "Avvio chiusura "
+                        "di emergenza."
+                    )
+
+                    return (
+                        emergency_close_trade(
+                            kraken,
+                            state,
+                            trade,
+                        )
+                    )
+
+        # ====================================================
+        # ENTRAMBE LE PROTEZIONI PRESENTI
+        # ====================================================
+
+        state.mark_protected()
+
+        trade = (
+            state.get_active_trade()
+        )
+
+        print(
+            "Posizione protetta "
+            "con SL + TP."
+        )
+
+        if not trade.get(
+            "telegram_open_sent"
+        ):
+
+            entry_price = float(
+                trade.get(
+                    "entry_fill_price"
+                )
+                or
+                trade[
+                    "requested_entry_price"
+                ]
             )
 
-            print(
-                "Posizione protetta "
-                "con SL + TP."
+            notional = (
+                float(volume)
+                * entry_price
             )
 
-            # =================================================
-            # TELEGRAM APERTURA
-            # =================================================
-
-            if not trade.get(
-                "telegram_open_sent"
-            ):
-
-                entry_price = (
-                    trade.get(
-                        "entry_fill_price"
-                    )
-                    or
-                    trade[
-                        "requested_entry_price"
-                    ]
-                )
-
-                notional = (
-                    float(
-                        volume
-                    )
-                    * float(
-                        entry_price
-                    )
-                )
-
-                risk = (
-                    abs(
-                        float(
-                            entry_price
-                        )
-                        -
-                        float(
-                            stop_loss
-                        )
-                    )
-                    *
-                    float(
-                        volume
-                    )
-                )
-
-                notify_trade_open(
-                    symbol=
-                    trade["symbol"],
-
-                    side=
-                    side,
-
-                    entry=
-                    float(
-                        entry_price
-                    ),
-
-                    stop_loss=
+            risk = (
+                abs(
+                    entry_price
+                    -
                     float(
                         stop_loss
-                    ),
-
-                    take_profit=
-                    float(
-                        take_profit
-                    ),
-
-                    notional=
-                    float(
-                        notional
-                    ),
-
-                    risk=
-                    float(
-                        risk
-                    ),
+                    )
                 )
-
-                state.mark_telegram_open_sent()
-
-            return True
-
-        except Exception as protection_error:
-
-            print(
-                "ERRORE PROTEZIONE: "
-                f"{protection_error}"
-            )
-
-            if stop_txid:
-
-                safe_cancel(
-                    kraken,
-                    stop_txid
-                )
-
-            if tp_txid:
-
-                safe_cancel(
-                    kraken,
-                    tp_txid
-                )
-
-            send_telegram_message(
-                "🚨 ERRORE PROTEZIONE TRADE\n\n"
-                f"{trade['symbol']} {side}\n"
-                "Tentativo di chiusura "
-                "di emergenza in corso."
+                *
+                float(volume)
             )
 
             try:
 
-                emergency_result = (
-                    kraken.close_position_market(
-                        pair=pair,
-                        entry_side=side,
-                        volume=volume,
-                        leverage=leverage,
-                        validate=False,
-                    )
+                notify_trade_open(
+                    symbol=
+                        trade[
+                            "symbol"
+                        ],
+
+                    side=
+                        side,
+
+                    entry=
+                        entry_price,
+
+                    stop_loss=
+                        float(
+                            stop_loss
+                        ),
+
+                    take_profit=
+                        float(
+                            take_profit
+                        ),
+
+                    notional=
+                        float(
+                            notional
+                        ),
+
+                    risk=
+                        float(
+                            risk
+                        ),
                 )
 
-                emergency_txid = (
-                    extract_txid(
-                        emergency_result
-                    )
-                )
+                state.mark_telegram_open_sent()
+
+            except Exception as e:
 
                 print(
-                    "Chiusura emergenza inviata: "
-                    f"{emergency_txid}"
+                    "Errore Telegram apertura: "
+                    f"{e}"
                 )
 
-                # Non consideriamo la posizione
-                # sicuramente chiusa finché Kraken
-                # non ne conferma l'esecuzione.
-                state.mark_exit_pending(
-                    "EMERGENCY_PROTECTION_FAILURE"
-                )
-
-                send_telegram_message(
-                    "🚨 CHIUSURA EMERGENZA INVIATA\n\n"
-                    f"Asset: {trade['symbol']}\n"
-                    "Motivo: impossibile creare "
-                    "correttamente SL/TP.\n"
-                    "Il bot verificherà la "
-                    "chiusura su Kraken."
-                )
-
-            except Exception as emergency_error:
-
-                print(
-                    "ERRORE GRAVE: "
-                    "chiusura emergenza fallita: "
-                    f"{emergency_error}"
-                )
-
-                send_telegram_message(
-                    "🚨🚨 ATTENZIONE CRITICA\n\n"
-                    f"{trade['symbol']} "
-                    "potrebbe essere SENZA "
-                    "protezione.\n"
-                    "Chiusura automatica "
-                    "di emergenza fallita.\n\n"
-                    "Controllare Kraken "
-                    "immediatamente."
-                )
-
-            return True
+        return True
 
     # ========================================================
-    # TRADE PROTETTO
+    # PROTECTED
     # ========================================================
 
     if status == "PROTECTED":
@@ -877,21 +1362,32 @@ def monitor_active_trade(
             )
         )
 
-        stop_order = (
-            kraken.get_order_info(
-                stop_txid
-            )
-            if stop_txid
-            else {}
-        )
+        try:
 
-        tp_order = (
-            kraken.get_order_info(
-                tp_txid
+            stop_order = (
+                kraken.get_order_info(
+                    stop_txid
+                )
+                if stop_txid
+                else {}
             )
-            if tp_txid
-            else {}
-        )
+
+            tp_order = (
+                kraken.get_order_info(
+                    tp_txid
+                )
+                if tp_txid
+                else {}
+            )
+
+        except Exception as e:
+
+            print(
+                "Errore lettura SL/TP: "
+                f"{e}"
+            )
+
+            return True
 
         stop_filled = (
             order_is_filled(
@@ -906,104 +1402,79 @@ def monitor_active_trade(
         )
 
         # ====================================================
+        # EVENTUALITÀ ANOMALA: ENTRAMBI CLOSED
+        # ====================================================
+
+        if (
+            stop_filled
+            and tp_filled
+        ):
+
+            print(
+                "ATTENZIONE: Kraken riporta "
+                "SL e TP entrambi closed."
+            )
+
+            safe_telegram(
+                "🚨 ANOMALIA KRAKEN\n\n"
+                f"{trade['symbol']}: "
+                "SL e TP risultano entrambi "
+                "closed. Il bot userà "
+                "l'ordine chiuso per primo."
+            )
+
+            stop_time = (
+                get_order_close_time(
+                    stop_order
+                )
+            )
+
+            tp_time = (
+                get_order_close_time(
+                    tp_order
+                )
+            )
+
+            if (
+                stop_time > 0
+                and tp_time > 0
+            ):
+
+                if stop_time <= tp_time:
+
+                    tp_filled = False
+
+                else:
+
+                    stop_filled = False
+
+        # ====================================================
         # TAKE PROFIT
         # ====================================================
 
         if tp_filled:
 
-            print(
-                "TAKE PROFIT ESEGUITO"
-            )
+            return (
+                finalize_trade_exit(
+                    kraken=
+                        kraken,
 
-            state.mark_exit_pending(
-                "TAKE_PROFIT"
-            )
+                    state=
+                        state,
 
-            safe_cancel(
-                kraken,
-                stop_txid
-            )
+                    trade=
+                        trade,
 
-            entry_price = float(
-                trade.get(
-                    "entry_fill_price"
-                )
-                or
-                trade[
-                    "requested_entry_price"
-                ]
-            )
+                    exit_order=
+                        tp_order,
 
-            volume = float(
-                trade.get(
-                    "entry_filled_volume"
-                )
-                or
-                trade[
-                    "requested_volume"
-                ]
-            )
+                    exit_reason=
+                        "TAKE_PROFIT",
 
-            exit_price = (
-                get_fill_price(
-                    tp_order,
-                    trade[
-                        "take_profit"
-                    ]
+                    opposite_txid=
+                        stop_txid,
                 )
             )
-
-            pnl = (
-                calculate_pnl(
-                    side=
-                    trade["side"],
-
-                    entry=
-                    entry_price,
-
-                    exit_price=
-                    exit_price,
-
-                    volume=
-                    volume,
-                )
-            )
-
-            if not trade.get(
-                "telegram_close_sent"
-            ):
-
-                notify_take_profit(
-                    symbol=
-                    trade["symbol"],
-
-                    side=
-                    trade["side"],
-
-                    entry=
-                    entry_price,
-
-                    exit_price=
-                    exit_price,
-
-                    profit=
-                    pnl,
-                )
-
-                state.mark_telegram_close_sent()
-
-            state.close_trade(
-                close_reason=
-                "TAKE_PROFIT",
-
-                exit_price=
-                exit_price,
-
-                pnl_eur=
-                pnl,
-            )
-
-            return True
 
         # ====================================================
         # STOP LOSS
@@ -1011,102 +1482,31 @@ def monitor_active_trade(
 
         if stop_filled:
 
-            print(
-                "STOP LOSS ESEGUITO"
-            )
+            return (
+                finalize_trade_exit(
+                    kraken=
+                        kraken,
 
-            state.mark_exit_pending(
-                "STOP_LOSS"
-            )
+                    state=
+                        state,
 
-            safe_cancel(
-                kraken,
-                tp_txid
-            )
+                    trade=
+                        trade,
 
-            entry_price = float(
-                trade.get(
-                    "entry_fill_price"
-                )
-                or
-                trade[
-                    "requested_entry_price"
-                ]
-            )
+                    exit_order=
+                        stop_order,
 
-            volume = float(
-                trade.get(
-                    "entry_filled_volume"
-                )
-                or
-                trade[
-                    "requested_volume"
-                ]
-            )
+                    exit_reason=
+                        "STOP_LOSS",
 
-            exit_price = (
-                get_fill_price(
-                    stop_order,
-                    trade[
-                        "stop_loss"
-                    ]
+                    opposite_txid=
+                        tp_txid,
                 )
             )
-
-            pnl = (
-                calculate_pnl(
-                    side=
-                    trade["side"],
-
-                    entry=
-                    entry_price,
-
-                    exit_price=
-                    exit_price,
-
-                    volume=
-                    volume,
-                )
-            )
-
-            if not trade.get(
-                "telegram_close_sent"
-            ):
-
-                notify_stop_loss(
-                    symbol=
-                    trade["symbol"],
-
-                    side=
-                    trade["side"],
-
-                    entry=
-                    entry_price,
-
-                    exit_price=
-                    exit_price,
-
-                    loss=
-                    pnl,
-                )
-
-                state.mark_telegram_close_sent()
-
-            state.close_trade(
-                close_reason=
-                "STOP_LOSS",
-
-                exit_price=
-                exit_price,
-
-                pnl_eur=
-                pnl,
-            )
-
-            return True
 
         print(
-            "Trade ancora aperto e protetto."
+            "Trade ancora aperto "
+            "e protetto."
         )
 
         return True
@@ -1140,18 +1540,20 @@ def monitor_active_trade(
         if positions:
 
             print(
-                "Posizione Kraken "
-                "ancora presente."
+                "Kraken segnala ancora "
+                "almeno una posizione aperta."
             )
 
             return True
 
+        # Non registriamo un P&L inventato
+        # per una chiusura di emergenza.
         state.close_trade(
             close_reason=
-            trade.get(
-                "close_reason",
-                "EXIT_CONFIRMED"
-            )
+                trade.get(
+                    "close_reason",
+                    "EXIT_CONFIRMED"
+                )
         )
 
         print(
@@ -1161,6 +1563,394 @@ def monitor_active_trade(
         )
 
         return True
+
+    return True
+
+
+# ============================================================
+# CHIUSURA EMERGENZA
+# ============================================================
+
+def emergency_close_trade(
+    kraken,
+    state,
+    trade,
+):
+
+    pair = (
+        trade[
+            "pair"
+        ]
+    )
+
+    side = (
+        trade[
+            "side"
+        ]
+    )
+
+    volume = (
+        trade.get(
+            "entry_filled_volume"
+        )
+        or
+        trade[
+            "requested_volume"
+        ]
+    )
+
+    leverage = (
+        trade[
+            "leverage"
+        ]
+    )
+
+    # Cancella solo le protezioni
+    # di cui conosciamo il TXID.
+    safe_cancel(
+        kraken,
+        trade.get(
+            "stop_txid"
+        )
+    )
+
+    safe_cancel(
+        kraken,
+        trade.get(
+            "take_profit_txid"
+        )
+    )
+
+    emergency_client_id = (
+        kraken.generate_client_order_id(
+            "emergency"
+        )
+    )
+
+    try:
+
+        result = (
+            kraken.close_position_market(
+                pair=
+                    pair,
+
+                entry_side=
+                    side,
+
+                volume=
+                    volume,
+
+                leverage=
+                    leverage,
+
+                validate=
+                    False,
+
+                client_order_id=
+                    emergency_client_id,
+            )
+        )
+
+        emergency_txid = (
+            extract_txid(
+                result
+            )
+        )
+
+        if not emergency_txid:
+
+            raise RuntimeError(
+                "TXID chiusura emergenza "
+                "non restituito"
+            )
+
+        state.mark_exit_pending(
+            "EMERGENCY_PROTECTION_FAILURE"
+        )
+
+        print(
+            "Chiusura emergenza inviata: "
+            f"{emergency_txid}"
+        )
+
+        safe_telegram(
+            "🚨 CHIUSURA EMERGENZA INVIATA\n\n"
+            f"Asset: "
+            f"{trade['symbol']}\n"
+            "Motivo: protezioni SL/TP "
+            "non confermate.\n"
+            "Il bot controllerà Kraken "
+            "nelle prossime esecuzioni."
+        )
+
+        return True
+
+    except Exception as e:
+
+        print(
+            "ERRORE CRITICO "
+            "CHIUSURA EMERGENZA: "
+            f"{e}"
+        )
+
+        safe_telegram(
+            "🚨🚨 ATTENZIONE CRITICA\n\n"
+            f"{trade['symbol']} potrebbe "
+            "avere una posizione "
+            "non correttamente protetta.\n"
+            "Chiusura automatica "
+            "di emergenza fallita.\n\n"
+            "Controllare Kraken."
+        )
+
+        # Lasciamo il trade attivo.
+        # Il bot NON aprirà altro.
+        return True
+
+
+# ============================================================
+# FINALIZZA TAKE PROFIT / STOP LOSS
+# ============================================================
+
+def finalize_trade_exit(
+    kraken,
+    state,
+    trade,
+    exit_order,
+    exit_reason,
+    opposite_txid,
+):
+
+    print(
+        f"{exit_reason} ESEGUITO"
+    )
+
+    state.mark_exit_pending(
+        exit_reason
+    )
+
+    safe_cancel(
+        kraken,
+        opposite_txid
+    )
+
+    entry_price = float(
+        trade.get(
+            "entry_fill_price"
+        )
+        or
+        trade[
+            "requested_entry_price"
+        ]
+    )
+
+    volume = float(
+        trade.get(
+            "entry_filled_volume"
+        )
+        or
+        trade[
+            "requested_volume"
+        ]
+    )
+
+    if (
+        exit_reason
+        == "TAKE_PROFIT"
+    ):
+
+        fallback_exit = (
+            trade[
+                "take_profit"
+            ]
+        )
+
+    else:
+
+        fallback_exit = (
+            trade[
+                "stop_loss"
+            ]
+        )
+
+    exit_price = (
+        get_fill_price(
+            exit_order,
+            fallback_exit
+        )
+    )
+
+    # ========================================================
+    # COMMISSIONE ENTRY
+    # ========================================================
+
+    entry_fee = 0.0
+
+    entry_txid = (
+        trade.get(
+            "entry_txid"
+        )
+    )
+
+    if entry_txid:
+
+        try:
+
+            entry_order = (
+                kraken.get_order_info(
+                    entry_txid
+                )
+            )
+
+            entry_fee = (
+                get_order_fee(
+                    entry_order
+                )
+            )
+
+        except Exception as e:
+
+            print(
+                "Impossibile recuperare "
+                f"fee entry: {e}"
+            )
+
+    # ========================================================
+    # COMMISSIONE EXIT
+    # ========================================================
+
+    exit_fee = (
+        get_order_fee(
+            exit_order
+        )
+    )
+
+    pnl_data = (
+        calculate_net_pnl(
+            side=
+                trade[
+                    "side"
+                ],
+
+            entry=
+                entry_price,
+
+            exit_price=
+                exit_price,
+
+            volume=
+                volume,
+
+            entry_fee=
+                entry_fee,
+
+            exit_fee=
+                exit_fee,
+        )
+    )
+
+    pnl = (
+        pnl_data[
+            "net_pnl"
+        ]
+    )
+
+    print(
+        f"P&L lordo: "
+        f"{pnl_data['gross_pnl']:.4f} EUR"
+    )
+
+    print(
+        f"Commissioni rilevate: "
+        f"{pnl_data['fees']:.4f} EUR"
+    )
+
+    print(
+        f"P&L netto: "
+        f"{pnl:.4f} EUR"
+    )
+
+    # ========================================================
+    # PRIMA CHIUDIAMO LO STATO
+    # Poi Telegram.
+    # ========================================================
+
+    state.close_trade(
+        close_reason=
+            exit_reason,
+
+        exit_price=
+            exit_price,
+
+        pnl_eur=
+            pnl,
+    )
+
+    try:
+
+        if (
+            not trade.get(
+                "telegram_close_sent"
+            )
+        ):
+
+            if (
+                exit_reason
+                == "TAKE_PROFIT"
+            ):
+
+                notify_take_profit(
+                    symbol=
+                        trade[
+                            "symbol"
+                        ],
+
+                    side=
+                        trade[
+                            "side"
+                        ],
+
+                    entry=
+                        entry_price,
+
+                    exit_price=
+                        exit_price,
+
+                    profit=
+                        pnl,
+                )
+
+            else:
+
+                notify_stop_loss(
+                    symbol=
+                        trade[
+                            "symbol"
+                        ],
+
+                    side=
+                        trade[
+                            "side"
+                        ],
+
+                    entry=
+                        entry_price,
+
+                    exit_price=
+                        exit_price,
+
+                    loss=
+                        pnl,
+                )
+
+            state.mark_telegram_close_sent()
+
+    except Exception as e:
+
+        print(
+            "Errore Telegram chiusura: "
+            f"{e}"
+        )
 
     return True
 
@@ -1189,7 +1979,8 @@ def run():
     )
 
     print(
-        f"MODE: {config.TRADING_MODE}"
+        f"MODE: "
+        f"{config.TRADING_MODE}"
     )
 
     print(
@@ -1197,12 +1988,15 @@ def run():
     )
 
     # ========================================================
-    # CONTROLLO MODALITÀ
+    # MODALITÀ
     # ========================================================
 
-    if config.TRADING_MODE not in (
-        "PAPER",
-        "LIVE",
+    if (
+        config.TRADING_MODE
+        not in (
+            "PAPER",
+            "LIVE",
+        )
     ):
 
         raise RuntimeError(
@@ -1211,14 +2005,16 @@ def run():
         )
 
     if (
-        config.TRADING_MODE == "LIVE"
+        config.TRADING_MODE
+        == "LIVE"
         and
         not config.ALLOW_LIVE_TRADING
     ):
 
         raise RuntimeError(
             "LIVE richiesto ma "
-            "ALLOW_LIVE_TRADING non è true"
+            "ALLOW_LIVE_TRADING "
+            "non è true"
         )
 
     kraken = (
@@ -1242,7 +2038,8 @@ def run():
     except Exception as e:
 
         print(
-            f"ERRORE KRAKEN BALANCE: {e}"
+            "ERRORE KRAKEN BALANCE: "
+            f"{e}"
         )
 
         return
@@ -1261,7 +2058,7 @@ def run():
     )
 
     print(
-        f"Capitale operativo bot: "
+        "Capitale operativo bot: "
         f"{operating_capital:.2f} EUR"
     )
 
@@ -1271,7 +2068,7 @@ def run():
     )
 
     # ========================================================
-    # TRADE ATTIVO HA SEMPRE PRIORITÀ
+    # TRADE ATTIVO
     # ========================================================
 
     try:
@@ -1304,26 +2101,14 @@ def run():
         else:
 
             print(
-                "Stato trade Firestore presente, "
+                "Trade Firestore presente "
                 "ma bot in PAPER."
             )
-
-        print(
-            "\n" + "=" * 60
-        )
-
-        print(
-            "CRYPTO BOT END"
-        )
-
-        print(
-            "=" * 60
-        )
 
         return
 
     # ========================================================
-    # LIMITI DI RISCHIO
+    # RISK CONTROL
     # ========================================================
 
     try:
@@ -1331,20 +2116,20 @@ def run():
         risk_allowed = (
             check_risk_limits(
                 state=
-                state,
+                    state,
 
                 operating_capital=
-                operating_capital,
+                    operating_capital,
             )
         )
 
     except Exception as e:
 
         print(
-            f"ERRORE RISK CONTROL: {e}"
+            "ERRORE RISK CONTROL: "
+            f"{e}"
         )
 
-        # Fail closed
         return
 
     if not risk_allowed:
@@ -1356,7 +2141,7 @@ def run():
         return
 
     # ========================================================
-    # CONTROLLO POSIZIONI / ORDINI KRAKEN
+    # KRAKEN DEVE ESSERE PULITO
     # ========================================================
 
     try:
@@ -1376,7 +2161,7 @@ def run():
                 "non presente in Firestore."
             )
 
-            send_telegram_message(
+            safe_telegram(
                 "🚨 ATTENZIONE CRYPTO BOT\n\n"
                 "Kraken segnala una posizione "
                 "aperta non registrata "
@@ -1390,8 +2175,7 @@ def run():
 
             print(
                 "Kraken segnala ordini aperti "
-                "non associati a un trade "
-                "attivo Firestore."
+                "non associati al trade Firestore."
             )
 
             return
@@ -1399,7 +2183,8 @@ def run():
     except Exception as e:
 
         print(
-            f"ERRORE CONTROLLO KRAKEN: {e}"
+            "ERRORE CONTROLLO KRAKEN: "
+            f"{e}"
         )
 
         return
@@ -1423,12 +2208,13 @@ def run():
         return
 
     # ========================================================
-    # ANALISI BTC / ETH
+    # BTC / ETH
     # ========================================================
 
-    for symbol, pair_info in (
-        config.PAIRS.items()
-    ):
+    for (
+        symbol,
+        pair_info
+    ) in config.PAIRS.items():
 
         pair = (
             pair_info[
@@ -1471,7 +2257,7 @@ def run():
         )
 
         print(
-            f"Controvalore previsto: "
+            "Controvalore previsto: "
             f"{target_notional:.2f} EUR"
         )
 
@@ -1511,7 +2297,8 @@ def run():
         except Exception as e:
 
             print(
-                f"Errore dati {symbol}: {e}"
+                f"Errore dati "
+                f"{symbol}: {e}"
             )
 
             continue
@@ -1529,7 +2316,7 @@ def run():
             continue
 
         # ====================================================
-        # IDENTIFICATIVO CANDELA
+        # CANDELA
         # ====================================================
 
         signal_candle = (
@@ -1542,7 +2329,7 @@ def run():
 
             print(
                 "Impossibile identificare "
-                "la candela M15."
+                "candela M15."
             )
 
             continue
@@ -1553,7 +2340,7 @@ def run():
         )
 
         # ====================================================
-        # ANALISI STRATEGIA
+        # STRATEGIA
         # ====================================================
 
         try:
@@ -1574,8 +2361,6 @@ def run():
                 f"{symbol}: {e}"
             )
 
-            # Non claimiamo la candela.
-            # Potrà essere ritentata.
             continue
 
         action = (
@@ -1593,7 +2378,7 @@ def run():
         )
 
         # ====================================================
-        # CLAIM ATOMICO CANDELA
+        # IDEMPOTENZA M15
         # ====================================================
 
         try:
@@ -1601,13 +2386,13 @@ def run():
             claimed = (
                 state.claim_signal_candle(
                     symbol=
-                    symbol,
+                        symbol,
 
                     candle_id=
-                    signal_candle,
+                        signal_candle,
 
                     action=
-                    action,
+                        action,
                 )
             )
 
@@ -1618,8 +2403,6 @@ def run():
                 f"{symbol}: {e}"
             )
 
-            # Fail closed:
-            # senza Firestore non apriamo trade.
             continue
 
         if not claimed:
@@ -1631,33 +2414,28 @@ def run():
 
             continue
 
-        # Salviamo anche motivo e risultato.
         try:
 
             state.update_signal_result(
                 symbol=
-                symbol,
+                    symbol,
 
                 candle_id=
-                signal_candle,
+                    signal_candle,
 
                 action=
-                action,
+                    action,
 
                 reason=
-                reason,
+                    reason,
             )
 
         except Exception as e:
 
             print(
-                "Avviso: impossibile aggiornare "
-                f"il risultato candela: {e}"
+                "Avviso signal state: "
+                f"{e}"
             )
-
-        # ====================================================
-        # LOG SEGNALE
-        # ====================================================
 
         print(
             f"Prezzo: "
@@ -1665,22 +2443,19 @@ def run():
         )
 
         print(
-            f"Segnale: "
-            f"{action}"
+            f"Segnale: {action}"
         )
 
         print(
-            f"Motivo: "
-            f"{reason}"
+            f"Motivo: {reason}"
         )
 
-        # ====================================================
-        # HOLD
-        # ====================================================
-
-        if action not in (
-            "BUY",
-            "SELL",
+        if (
+            action
+            not in (
+                "BUY",
+                "SELL",
+            )
         ):
 
             print(
@@ -1690,12 +2465,10 @@ def run():
             continue
 
         # ====================================================
-        # SEGNALE BUY / SELL
+        # SEGNALE
         # ====================================================
 
-        side = (
-            action
-        )
+        side = action
 
         entry = float(
             analysis[
@@ -1715,26 +2488,22 @@ def run():
             ]
         )
 
-        # ====================================================
-        # POSITION SIZING
-        # ====================================================
-
         sizing = (
             calculate_position_size(
                 capital=
-                operating_capital,
+                    operating_capital,
 
                 allocation_pct=
-                allocation_pct,
+                    allocation_pct,
 
                 entry=
-                entry,
+                    entry,
 
                 stop_loss=
-                stop_loss,
+                    stop_loss,
 
                 min_notional=
-                min_notional,
+                    min_notional,
             )
         )
 
@@ -1743,7 +2512,7 @@ def run():
         ]:
 
             print(
-                f"TRADE BLOCCATO: "
+                "TRADE BLOCCATO: "
                 f"{sizing['reason']}"
             )
 
@@ -1768,7 +2537,7 @@ def run():
         )
 
         # ====================================================
-        # AI GUARD
+        # AI
         # ====================================================
 
         technical_data = {
@@ -1837,16 +2606,16 @@ def run():
             ai_result = (
                 guard.evaluate_market_risk(
                     asset=
-                    symbol,
+                        symbol,
 
                     side=
-                    side,
+                        side,
 
                     current_price=
-                    entry,
+                        entry,
 
                     technical_data=
-                    technical_data,
+                        technical_data,
                 )
             )
 
@@ -1856,12 +2625,10 @@ def run():
                 f"AI Guard error: {e}"
             )
 
-            # Candela resta processata.
-            # Non riproviamo lo stesso segnale.
             continue
 
         print(
-            f"AI decision: "
+            "AI decision: "
             f"{ai_result['decision']}"
         )
 
@@ -1908,12 +2675,12 @@ def run():
             )
 
             print(
-                f"Controvalore: "
+                "Controvalore: "
                 f"{notional:.2f} EUR"
             )
 
             print(
-                f"Rischio teorico: "
+                "Rischio teorico: "
                 f"{actual_risk:.2f} EUR"
             )
 
@@ -1940,38 +2707,56 @@ def run():
             )
 
         # ====================================================
-        # CREA STATO PRIMA DELL'ENTRY
+        # GENERA CLIENT ORDER ID PRIMA DI KRAKEN
+        # ====================================================
+
+        entry_client_order_id = (
+            kraken.generate_client_order_id(
+                "entry"
+            )
+        )
+
+        print(
+            "Entry client order ID: "
+            f"{entry_client_order_id}"
+        )
+
+        # ====================================================
+        # FIRESTORE PRIMA DELL'ORDINE
         # ====================================================
 
         try:
 
             state.create_trade(
                 symbol=
-                symbol,
+                    symbol,
 
                 pair=
-                pair,
+                    pair,
 
                 side=
-                side,
+                    side,
 
                 requested_entry_price=
-                entry,
+                    entry,
 
                 requested_volume=
-                quantity,
+                    quantity,
 
                 stop_loss=
-                stop_loss,
+                    stop_loss,
 
                 take_profit=
-                take_profit,
+                    take_profit,
 
                 leverage=
-                leverage,
+                    leverage,
 
                 signal_candle=
-                signal_candle,
+                    signal_candle,
+
+                entry_client_order_id=
+                    entry_client_order_id,
             )
 
         except Exception as e:
@@ -1981,12 +2766,10 @@ def run():
                 f"TRADE: {e}"
             )
 
-            # Non inviamo l'ordine se
-            # Firestore non è pronto.
             continue
 
         # ====================================================
-        # ENTRY KRAKEN
+        # ORDINE KRAKEN CON LO STESSO cl_ord_id
         # ====================================================
 
         try:
@@ -1994,18 +2777,22 @@ def run():
             entry_result = (
                 kraken.create_market_order(
                     pair=
-                    pair,
+                        pair,
 
                     side=
-                    side,
+                        side,
 
                     volume=
-                    quantity,
+                        quantity,
 
                     leverage=
-                    leverage,
+                        leverage,
 
-                    validate=False,
+                    validate=
+                        False,
+
+                    client_order_id=
+                        entry_client_order_id,
                 )
             )
 
@@ -2023,7 +2810,11 @@ def run():
                 )
 
             state.set_entry_order(
-                entry_txid
+                txid=
+                    entry_txid,
+
+                client_order_id=
+                    entry_client_order_id,
             )
 
             print(
@@ -2034,18 +2825,37 @@ def run():
         except Exception as e:
 
             print(
-                f"ENTRY FALLITA: {e}"
+                "ENTRY RISPOSTA INCERTA: "
+                f"{e}"
             )
 
-            # La candela resta processata:
-            # evitiamo un secondo ordine
-            # sullo stesso segnale.
-            state.clear_trade()
+            # IMPORTANTISSIMO:
+            # NON cancelliamo Firestore.
+            #
+            # Kraken potrebbe aver ricevuto
+            # l'ordine anche se la risposta
+            # non è arrivata al bot.
+            #
+            # La prossima esecuzione userà
+            # entry_client_order_id per
+            # riconciliare l'ordine.
 
-            continue
+            safe_telegram(
+                "⚠️ ENTRY KRAKEN DA VERIFICARE\n\n"
+                f"Asset: {symbol}\n"
+                f"Side: {side}\n"
+                "La risposta dell'ordine "
+                "non è stata confermata.\n"
+                "Il bot NON invierà "
+                "un secondo ordine e proverà "
+                "a recuperarlo tramite "
+                "client order ID."
+            )
+
+            return
 
         # ====================================================
-        # ATTESA BREVE DEL FILL
+        # ATTESA BREVE FILL
         # ====================================================
 
         for _ in range(10):
@@ -2084,16 +2894,16 @@ def run():
 
                 state.mark_entry_filled(
                     fill_price=
-                    fill_price,
+                        fill_price,
 
                     filled_volume=
-                    filled_volume,
+                        filled_volume,
                 )
 
                 break
 
         # ====================================================
-        # PROTEGGI POSIZIONE
+        # MONITOR / PROTEZIONE
         # ====================================================
 
         trade = (
@@ -2108,7 +2918,7 @@ def run():
                 trade,
             )
 
-        # MAX_OPEN_POSITIONS = 1
+        # MAX 1 POSIZIONE
         break
 
     print(
