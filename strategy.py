@@ -19,11 +19,8 @@ from config import (
 )
 
 
-# ============================================================
-# INDICATORS
-# ============================================================
-
 def calculate_indicators(df):
+    """Calcola gli indicatori tecnici utilizzati dalla strategia."""
 
     df = df.copy()
 
@@ -32,7 +29,7 @@ def calculate_indicators(df):
         "high",
         "low",
         "close",
-        "volume"
+        "volume",
     ]
 
     for column in numeric_columns:
@@ -41,17 +38,15 @@ def calculate_indicators(df):
             errors="coerce"
         )
 
-    # --------------------------------------------------------
-    # TRUE RANGE
-    # --------------------------------------------------------
+    # ========================================================
+    # TRUE RANGE / ATR
+    # ========================================================
 
     previous_close = df["close"].shift(1)
 
     tr1 = df["high"] - df["low"]
-
-    tr2 = abs(df["high"] - previous_close)
-
-    tr3 = abs(df["low"] - previous_close)
+    tr2 = (df["high"] - previous_close).abs()
+    tr3 = (df["low"] - previous_close).abs()
 
     true_range = pd.concat(
         [tr1, tr2, tr3],
@@ -64,25 +59,22 @@ def calculate_indicators(df):
         .mean()
     )
 
+    # Media ATR utilizzata per capire
+    # il regime di volatilità corrente.
     df["atr_ma"] = (
         df["atr"]
         .rolling(20)
         .mean()
     )
 
-
-    # --------------------------------------------------------
-    # ATR VOLATILITY REGIME
-    # --------------------------------------------------------
-
     df["atr_ratio"] = (
-        df["atr"] / df["atr_ma"]
+        df["atr"] /
+        df["atr_ma"]
     )
 
-
-    # --------------------------------------------------------
+    # ========================================================
     # EMA 200
-    # --------------------------------------------------------
+    # ========================================================
 
     df["ema200"] = (
         df["close"]
@@ -93,38 +85,38 @@ def calculate_indicators(df):
         .mean()
     )
 
-
-    # --------------------------------------------------------
+    # ========================================================
     # RSI
-    # --------------------------------------------------------
+    # ========================================================
 
     delta = df["close"].diff()
 
     gain = (
         delta
-        .where(delta > 0, 0)
+        .clip(lower=0)
         .rolling(RSI_PERIOD)
         .mean()
     )
 
     loss = (
-        -delta
-        .where(delta < 0, 0)
+        (-delta.clip(upper=0))
         .rolling(RSI_PERIOD)
         .mean()
     )
 
     rs = gain / loss.replace(0, np.nan)
 
-    df["rsi"] = 100 - (
-        100 / (1 + rs)
+    df["rsi"] = (
+        100 -
+        (100 / (1 + rs))
     )
 
+    # ========================================================
+    # DONCHIAN CHANNEL
+    # ========================================================
 
-    # --------------------------------------------------------
-    # DONCHIAN
-    # --------------------------------------------------------
-
+    # shift(1) evita di utilizzare la candela corrente
+    # per determinare il breakout.
     df["donchian_high"] = (
         df["high"]
         .shift(1)
@@ -139,10 +131,9 @@ def calculate_indicators(df):
         .min()
     )
 
-
-    # --------------------------------------------------------
+    # ========================================================
     # ADX
-    # --------------------------------------------------------
+    # ========================================================
 
     up_move = (
         df["high"] -
@@ -154,21 +145,27 @@ def calculate_indicators(df):
         df["low"]
     )
 
-    plus_dm = np.where(
-        (up_move > down_move) &
-        (up_move > 0),
-        up_move,
-        0.0
+    plus_dm = pd.Series(
+        np.where(
+            (up_move > down_move) &
+            (up_move > 0),
+            up_move,
+            0.0
+        ),
+        index=df.index
     )
 
-    minus_dm = np.where(
-        (down_move > up_move) &
-        (down_move > 0),
-        down_move,
-        0.0
+    minus_dm = pd.Series(
+        np.where(
+            (down_move > up_move) &
+            (down_move > 0),
+            down_move,
+            0.0
+        ),
+        index=df.index
     )
 
-    tr_sum = (
+    atr_sum = (
         true_range
         .rolling(ADX_PERIOD)
         .sum()
@@ -176,34 +173,29 @@ def calculate_indicators(df):
 
     plus_di = (
         100 *
-        pd.Series(
-            plus_dm,
-            index=df.index
-        )
+        plus_dm
         .rolling(ADX_PERIOD)
         .sum()
-        / tr_sum
+        / atr_sum.replace(0, np.nan)
     )
 
     minus_di = (
         100 *
-        pd.Series(
-            minus_dm,
-            index=df.index
-        )
+        minus_dm
         .rolling(ADX_PERIOD)
         .sum()
-        / tr_sum
+        / atr_sum.replace(0, np.nan)
     )
 
-    denominator = (
-        plus_di + minus_di
+    di_sum = (
+        plus_di +
+        minus_di
     ).replace(0, np.nan)
 
     dx = (
         100 *
-        abs(plus_di - minus_di)
-        / denominator
+        (plus_di - minus_di).abs()
+        / di_sum
     )
 
     df["adx"] = (
@@ -215,21 +207,18 @@ def calculate_indicators(df):
     return df
 
 
-# ============================================================
-# ANALYSE SINGOLO TIMEFRAME
-# ============================================================
-
 def analyze_timeframe(df):
+    """Restituisce i dati tecnici dell'ultima candela chiusa."""
 
     if df is None or df.empty:
         return None
 
     df = calculate_indicators(df)
 
-    if len(df) < 250:
+    # EMA200 richiede abbastanza storico.
+    if len(df) < EMA_PERIOD + 30:
         return None
 
-    # Ultima candela CHIUSA
     row = df.iloc[-1]
 
     required = [
@@ -258,11 +247,10 @@ def analyze_timeframe(df):
     }
 
 
-# ============================================================
-# ADAPTIVE ATR STOP
-# ============================================================
-
 def get_atr_multiplier(atr_ratio):
+    """
+    Allarga lo stop quando la volatilità aumenta.
+    """
 
     if atr_ratio >= ATR_EXTREME_VOL_RATIO:
         return ATR_SL_EXTREME_VOL
@@ -273,16 +261,19 @@ def get_atr_multiplier(atr_ratio):
     return ATR_SL_NORMAL
 
 
-# ============================================================
-# MULTI-TIMEFRAME STRATEGY
-# ============================================================
-
 def analyze_market(
     h4_df,
     h1_df,
     m15_df,
     symbol="BTC"
 ):
+    """
+    Strategia:
+
+    H4  -> trend principale
+    H1  -> conferma trend
+    M15 -> trigger d'ingresso
+    """
 
     h4 = analyze_timeframe(h4_df)
     h1 = analyze_timeframe(h1_df)
@@ -294,37 +285,40 @@ def analyze_market(
             "reason": "Dati insufficienti"
         }
 
-
     # ========================================================
-    # H4 TREND
+    # TREND H4
     # ========================================================
 
     h4_bull = (
-        h4["price"] > h4["ema200"]
+        h4["price"] >
+        h4["ema200"]
     )
 
     h4_bear = (
-        h4["price"] < h4["ema200"]
+        h4["price"] <
+        h4["ema200"]
     )
 
-
     # ========================================================
-    # H1 CONFIRMATION
+    # CONFERMA H1
     # ========================================================
 
     h1_bull = (
-        h1["price"] > h1["ema200"] and
-        h1["adx"] > ADX_MIN
+        h1["price"] >
+        h1["ema200"]
+        and
+        h1["adx"] >= ADX_MIN
     )
 
     h1_bear = (
-        h1["price"] < h1["ema200"] and
-        h1["adx"] > ADX_MIN
+        h1["price"] <
+        h1["ema200"]
+        and
+        h1["adx"] >= ADX_MIN
     )
 
-
     # ========================================================
-    # M15 ENTRY
+    # TRIGGER M15
     # ========================================================
 
     long_entry = (
@@ -334,7 +328,7 @@ def analyze_market(
         m15["rsi"] <
         RSI_MAX_LONG
         and
-        m15["adx"] >
+        m15["adx"] >=
         ADX_MIN
     )
 
@@ -345,34 +339,37 @@ def analyze_market(
         m15["rsi"] >
         RSI_MIN_SHORT
         and
-        m15["adx"] >
+        m15["adx"] >=
         ADX_MIN
     )
 
-
     # ========================================================
-    # SIGNAL
+    # SEGNALE
     # ========================================================
 
     if h4_bull and h1_bull and long_entry:
-
         side = "BUY"
 
     elif h4_bear and h1_bear and short_entry:
-
         side = "SELL"
 
     else:
-
         return {
             "action": "HOLD",
             "reason": "Nessuna conferma multi-timeframe",
             "price": m15["price"],
+            "h4_trend": (
+                "BULL" if h4_bull else "BEAR"
+            ),
+            "h1_trend": (
+                "BULL" if h1_bull else "BEAR"
+            ),
+            "m15_rsi": round(m15["rsi"], 2),
+            "m15_adx": round(m15["adx"], 2),
         }
 
-
     # ========================================================
-    # ADAPTIVE STOP LOSS
+    # STOP LOSS ADATTIVO
     # ========================================================
 
     atr_multiplier = get_atr_multiplier(
@@ -380,14 +377,23 @@ def analyze_market(
     )
 
     entry = m15["price"]
-
     atr = m15["atr"]
 
-    stop_distance = atr * atr_multiplier
+    stop_distance = (
+        atr *
+        atr_multiplier
+    )
+
+    # ========================================================
+    # TAKE PROFIT 1:2
+    # ========================================================
 
     if side == "BUY":
 
-        stop_loss = entry - stop_distance
+        stop_loss = (
+            entry -
+            stop_distance
+        )
 
         take_profit = (
             entry +
@@ -397,7 +403,10 @@ def analyze_market(
 
     else:
 
-        stop_loss = entry + stop_distance
+        stop_loss = (
+            entry +
+            stop_distance
+        )
 
         take_profit = (
             entry -
@@ -405,18 +414,33 @@ def analyze_market(
             RISK_REWARD
         )
 
-
     return {
+        "symbol": symbol,
         "action": side,
         "price": round(entry, 2),
-        "atr": round(atr, 2),
-        "atr_ratio": round(m15["atr_ratio"], 2),
-        "atr_multiplier": atr_multiplier,
         "stop_loss": round(stop_loss, 2),
         "take_profit": round(take_profit, 2),
-        "rsi": round(m15["rsi"], 2),
-        "adx": round(m15["adx"], 2),
-        "h4_trend": "BULL" if h4_bull else "BEAR",
-        "h1_trend": "BULL" if h1_bull else "BEAR",
-        "action_reason": "H4 + H1 + M15 confermati",
+        "atr": round(atr, 2),
+        "atr_ratio": round(
+            m15["atr_ratio"],
+            2
+        ),
+        "atr_multiplier": atr_multiplier,
+        "rsi": round(
+            m15["rsi"],
+            2
+        ),
+        "adx": round(
+            m15["adx"],
+            2
+        ),
+        "h4_trend": (
+            "BULL" if h4_bull else "BEAR"
+        ),
+        "h1_trend": (
+            "BULL" if h1_bull else "BEAR"
+        ),
+        "reason": (
+            "H4 + H1 + M15 confermati"
+        ),
     }
