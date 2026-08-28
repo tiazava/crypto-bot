@@ -2,14 +2,12 @@ name: Crypto Bot Scanner 24/7
 
 on:
   schedule:
-    # Esegue lo script allo scoccare di ogni ora
     - cron: '0 * * * *'
-  # Permette di avviare il bot anche manualmente da GitHub quando vuoi
   workflow_dispatch:
 
 jobs:
   run-bot:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
     - name: Download codice
