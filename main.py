@@ -1519,47 +1519,132 @@ def monitor_active_trade(
 
         print(
             "Uscita già richiesta. "
-            "Verifica posizione Kraken."
+            "Riconciliazione ordine esatto Kraken."
         )
 
-        try:
+        emergency_txid = trade.get(
+            "emergency_txid"
+        )
 
-            positions = (
-                kraken.get_open_positions()
-            )
+        emergency_client_id = trade.get(
+            "emergency_client_order_id"
+        )
 
-        except Exception as e:
+        emergency_order = None
 
-            print(
-                "Impossibile verificare "
-                f"le posizioni: {e}"
-            )
+        # Prima proviamo il TXID già persistito.
+        if emergency_txid:
 
-            return True
+            try:
 
-        if positions:
-
-            print(
-                "Kraken segnala ancora "
-                "almeno una posizione aperta."
-            )
-
-            return True
-
-        # Non registriamo un P&L inventato
-        # per una chiusura di emergenza.
-        state.close_trade(
-            close_reason=
-                trade.get(
-                    "close_reason",
-                    "EXIT_CONFIRMED"
+                emergency_order = (
+                    kraken.get_order_info(
+                        emergency_txid
+                    )
                 )
-        )
+
+            except Exception as e:
+
+                print(
+                    "Errore lettura emergency TXID "
+                    f"{emergency_txid}: {e}"
+                )
+
+        # Se il TXID manca o QueryOrders non ha dato
+        # un ordine valido, riconciliamo tramite cl_ord_id.
+        if (
+            not emergency_order
+            and emergency_client_id
+        ):
+
+            recovered = (
+                recover_order_by_client_id(
+                    kraken,
+                    emergency_client_id
+                )
+            )
+
+            if recovered:
+
+                emergency_txid = (
+                    recovered.get("txid")
+                )
+
+                emergency_order = (
+                    recovered.get("order")
+                    or {}
+                )
+
+                state.set_emergency_order(
+                    txid=emergency_txid,
+                    client_order_id=
+                        emergency_client_id,
+                )
+
+        if not emergency_order:
+
+            print(
+                "ERRORE CRITICO: impossibile "
+                "riconciliare l'ordine di uscita "
+                "di emergenza. Nessun nuovo ordine."
+            )
+
+            safe_telegram(
+                "🚨 USCITA EMERGENZA DA VERIFICARE\n\n"
+                f"Asset: {trade.get('symbol')}\n"
+                "Il bot non riesce a confermare "
+                "l'ordine di uscita tramite TXID "
+                "o client order ID.\n"
+                "Controllare Kraken."
+            )
+
+            return True
+
+        if order_is_filled(
+            emergency_order
+        ):
+
+            return (
+                finalize_emergency_exit(
+                    kraken=kraken,
+                    state=state,
+                    trade=trade,
+                    exit_order=emergency_order,
+                )
+            )
+
+        order_status = str(
+            emergency_order.get(
+                "status",
+                ""
+            )
+        ).lower()
+
+        if order_status in {
+            "canceled",
+            "cancelled",
+            "expired",
+        }:
+
+            print(
+                "ERRORE CRITICO: ordine emergency "
+                f"in stato {order_status}."
+            )
+
+            safe_telegram(
+                "🚨 USCITA EMERGENZA NON ESEGUITA\n\n"
+                f"Asset: {trade.get('symbol')}\n"
+                f"Stato Kraken: {order_status}\n"
+                "Il bot resta bloccato. "
+                "Controllare Kraken."
+            )
+
+            return True
 
         print(
-            "Kraken non segnala più "
-            "posizioni aperte. "
-            "Trade marcato CLOSED."
+            "Ordine di uscita emergenza presente "
+            f"su Kraken, stato={order_status or 'unknown'}. "
+            "Attendo esecuzione."
         )
 
         return True
@@ -1621,11 +1706,83 @@ def emergency_close_trade(
         )
     )
 
-    emergency_client_id = (
-        kraken.generate_client_order_id(
-            "emergency"
+    emergency_txid = (
+        trade.get(
+            "emergency_txid"
         )
     )
+
+    emergency_client_id = (
+        trade.get(
+            "emergency_client_order_id"
+        )
+    )
+
+    # Se esiste già un identificativo, NON generiamo
+    # un secondo ordine: prima riconciliamo quello esistente.
+    if (
+        not emergency_txid
+        and emergency_client_id
+    ):
+
+        recovered = (
+            recover_order_by_client_id(
+                kraken,
+                emergency_client_id
+            )
+        )
+
+        if recovered:
+
+            emergency_txid = (
+                recovered.get("txid")
+            )
+
+            state.set_emergency_order(
+                txid=emergency_txid,
+                client_order_id=
+                    emergency_client_id,
+            )
+
+            state.mark_exit_pending(
+                "EMERGENCY_PROTECTION_FAILURE"
+            )
+
+            print(
+                "Chiusura emergenza già presente "
+                f"su Kraken: {emergency_txid}"
+            )
+
+            return True
+
+    if emergency_txid:
+
+        state.mark_exit_pending(
+            "EMERGENCY_PROTECTION_FAILURE"
+        )
+
+        print(
+            "Chiusura emergenza già registrata: "
+            f"{emergency_txid}"
+        )
+
+        return True
+
+    if not emergency_client_id:
+
+        emergency_client_id = (
+            kraken.generate_client_order_id(
+                "emergency"
+            )
+        )
+
+        # Persistenza PRIMA di AddOrder:
+        # elimina il crash gap tra Kraken e Firestore.
+        state.set_emergency_order(
+            txid=None,
+            client_order_id=
+                emergency_client_id,
+        )
 
     try:
 
@@ -1664,6 +1821,12 @@ def emergency_close_trade(
                 "non restituito"
             )
 
+        state.set_emergency_order(
+            txid=emergency_txid,
+            client_order_id=
+                emergency_client_id,
+        )
+
         state.mark_exit_pending(
             "EMERGENCY_PROTECTION_FAILURE"
         )
@@ -1679,8 +1842,9 @@ def emergency_close_trade(
             f"{trade['symbol']}\n"
             "Motivo: protezioni SL/TP "
             "non confermate.\n"
-            "Il bot controllerà Kraken "
-            "nelle prossime esecuzioni."
+            "Il bot riconcilierà questo "
+            "specifico ordine nelle "
+            "prossime esecuzioni."
         )
 
         return True
@@ -1688,24 +1852,222 @@ def emergency_close_trade(
     except Exception as e:
 
         print(
-            "ERRORE CRITICO "
+            "RISPOSTA INCERTA "
             "CHIUSURA EMERGENZA: "
             f"{e}"
         )
+
+        # L'ordine potrebbe essere arrivato a Kraken
+        # anche se la risposta è andata persa.
+        recovered = (
+            recover_order_by_client_id(
+                kraken,
+                emergency_client_id
+            )
+        )
+
+        if recovered:
+
+            emergency_txid = (
+                recovered.get("txid")
+            )
+
+            state.set_emergency_order(
+                txid=emergency_txid,
+                client_order_id=
+                    emergency_client_id,
+            )
+
+            state.mark_exit_pending(
+                "EMERGENCY_PROTECTION_FAILURE"
+            )
+
+            print(
+                "Chiusura emergenza recuperata "
+                f"tramite cl_ord_id: {emergency_txid}"
+            )
+
+            return True
 
         safe_telegram(
             "🚨🚨 ATTENZIONE CRITICA\n\n"
             f"{trade['symbol']} potrebbe "
             "avere una posizione "
             "non correttamente protetta.\n"
-            "Chiusura automatica "
-            "di emergenza fallita.\n\n"
+            "L'ordine di emergenza non è "
+            "stato confermato, ma il suo "
+            "client order ID resta salvato.\n\n"
+            "Il bot NON invierà alla cieca "
+            "un secondo ordine. "
             "Controllare Kraken."
         )
 
-        # Lasciamo il trade attivo.
-        # Il bot NON aprirà altro.
+        # Fail-closed: lasciamo lo stato attivo.
         return True
+
+
+# ============================================================
+# FINALIZZA USCITA EMERGENZA
+# ============================================================
+
+def finalize_emergency_exit(
+    kraken,
+    state,
+    trade,
+    exit_order,
+):
+
+    entry_price = float(
+        trade.get(
+            "entry_fill_price"
+        )
+        or
+        trade[
+            "requested_entry_price"
+        ]
+    )
+
+    volume = (
+        get_filled_volume(
+            exit_order,
+            trade.get(
+                "entry_filled_volume"
+            )
+            or
+            trade[
+                "requested_volume"
+            ],
+        )
+    )
+
+    exit_price = (
+        get_fill_price(
+            exit_order,
+            entry_price,
+        )
+    )
+
+    entry_fee = 0.0
+
+    entry_txid = (
+        trade.get(
+            "entry_txid"
+        )
+    )
+
+    if entry_txid:
+
+        try:
+
+            entry_order = (
+                kraken.get_order_info(
+                    entry_txid
+                )
+            )
+
+            entry_fee = (
+                get_order_fee(
+                    entry_order
+                )
+            )
+
+        except Exception as e:
+
+            print(
+                "Impossibile recuperare "
+                f"fee entry emergency: {e}"
+            )
+
+    exit_fee = (
+        get_order_fee(
+            exit_order
+        )
+    )
+
+    pnl_data = (
+        calculate_net_pnl(
+            side=
+                trade[
+                    "side"
+                ],
+
+            entry=
+                entry_price,
+
+            exit_price=
+                exit_price,
+
+            volume=
+                volume,
+
+            entry_fee=
+                entry_fee,
+
+            exit_fee=
+                exit_fee,
+        )
+    )
+
+    pnl = (
+        pnl_data[
+            "net_pnl"
+        ]
+    )
+
+    print(
+        "USCITA EMERGENZA ESEGUITA"
+    )
+
+    print(
+        f"Exit: {exit_price:.4f} EUR"
+    )
+
+    print(
+        f"P&L netto rilevato: "
+        f"{pnl:.4f} EUR"
+    )
+
+    # close_trade è atomico/idempotente:
+    # un retry non raddoppia il P&L.
+    state.close_trade(
+        close_reason=
+            trade.get(
+                "close_reason",
+                "EMERGENCY_PROTECTION_FAILURE"
+            ),
+
+        exit_price=
+            exit_price,
+
+        pnl_eur=
+            pnl,
+    )
+
+    if not trade.get(
+        "telegram_close_sent"
+    ):
+
+        safe_telegram(
+            "🚨 USCITA EMERGENZA ESEGUITA\n\n"
+            f"Asset: {trade.get('symbol')}\n"
+            f"Side originario: {trade.get('side')}\n"
+            f"Entry: {entry_price:.4f} EUR\n"
+            f"Exit: {exit_price:.4f} EUR\n"
+            f"P&L netto rilevato: {pnl:.4f} EUR"
+        )
+
+        try:
+
+            state.mark_telegram_close_sent()
+
+        except Exception as e:
+
+            print(
+                "Errore flag Telegram "
+                f"emergency close: {e}"
+            )
+
+    return True
 
 
 # ============================================================
