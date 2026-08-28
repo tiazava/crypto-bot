@@ -1,38 +1,47 @@
-import os
 import uuid
 from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
 
-import pandas as pd
 import krakenex
-from dotenv import load_dotenv
+import pandas as pd
 
-
-load_dotenv()
+import config
 
 
 class KrakenClient:
 
-    def __init__(self):
-        self.k = krakenex.API()
-        self.k.key = os.getenv(
-            "KRAKEN_API_KEY",
-            ""
-        ).strip()
+    # ========================================================
+    # INIT
+    # ========================================================
 
-        self.k.secret = os.getenv(
-            "KRAKEN_SECRET_KEY",
-            ""
-        ).strip()
+    def __init__(self):
+
+        self.api_key = (
+            config.KRAKEN_API_KEY
+        )
+
+        self.api_secret = (
+            config.KRAKEN_SECRET_KEY
+        )
+
+        self.k = krakenex.API(
+            key=self.api_key,
+            secret=self.api_secret,
+        )
 
     # ========================================================
-    # CREDENZIALI
+    # CONTROLLO CREDENZIALI
     # ========================================================
 
     def _check_credentials(self):
 
-        if not self.k.key or not self.k.secret:
+        if (
+            not self.api_key
+            or not self.api_secret
+        ):
+
             raise RuntimeError(
-                "KRAKEN_API_KEY o KRAKEN_SECRET_KEY mancanti"
+                "KRAKEN_API_KEY o "
+                "KRAKEN_SECRET_KEY mancanti"
             )
 
     # ========================================================
@@ -40,29 +49,50 @@ class KrakenClient:
     # ========================================================
 
     @staticmethod
-    def _check_response(response, operation):
+    def _check_response(
+        response,
+        operation
+    ):
 
-        errors = response.get("error", [])
+        if response is None:
 
-        if errors:
             raise RuntimeError(
-                f"Kraken {operation} error: {errors}"
+                f"Kraken {operation}: "
+                "risposta vuota"
             )
 
-        return response.get("result", {})
+        errors = response.get(
+            "error",
+            []
+        )
+
+        if errors:
+
+            raise RuntimeError(
+                f"Kraken {operation} error: "
+                f"{errors}"
+            )
+
+        return response.get(
+            "result",
+            {}
+        )
 
     # ========================================================
     # CLIENT ORDER ID
-    # max 18 caratteri
+    # Kraken: max 18 caratteri
     # ========================================================
 
     @staticmethod
-    def _generate_client_order_id(order_type="e"):
+    def _generate_client_order_id(
+        order_type="entry"
+    ):
 
         prefix_map = {
             "entry": "e",
             "stop": "s",
             "take_profit": "t",
+            "emergency": "x",
         }
 
         prefix = prefix_map.get(
@@ -70,12 +100,21 @@ class KrakenClient:
             str(order_type)[0].lower()
         )
 
-        random_part = uuid.uuid4().hex[:13]
+        random_part = (
+            uuid.uuid4()
+            .hex[:13]
+        )
 
-        return f"cb-{prefix}-{random_part}"
+        client_order_id = (
+            f"cb-{prefix}-{random_part}"
+        )
 
-        # ========================================================
-    # GENERA CLIENT ORDER ID PUBBLICO
+        # Protezione aggiuntiva:
+        # Kraken accetta max 18 caratteri.
+        return client_order_id[:18]
+
+    # ========================================================
+    # CLIENT ORDER ID PUBBLICO
     # ========================================================
 
     def generate_client_order_id(
@@ -83,16 +122,22 @@ class KrakenClient:
         order_type="entry"
     ):
         """
-        Genera un identificativo univoco da salvare
-        in Firestore PRIMA di inviare l'ordine a Kraken.
+        Genera il client order ID PRIMA
+        dell'invio dell'ordine.
 
-        In questo modo lo stesso ordine può essere
-        riconciliato dopo un crash del bot.
+        Questo ID deve essere salvato in Firestore
+        prima di chiamare AddOrder.
+
+        In caso di crash potremo riconciliare
+        Firestore con Kraken.
         """
 
-        return self._generate_client_order_id(
-            order_type
+        return (
+            self._generate_client_order_id(
+                order_type
+            )
         )
+
     # ========================================================
     # SALDO ACCOUNT
     # ========================================================
@@ -101,13 +146,17 @@ class KrakenClient:
 
         self._check_credentials()
 
-        response = self.k.query_private(
-            "Balance"
+        response = (
+            self.k.query_private(
+                "Balance"
+            )
         )
 
-        result = self._check_response(
-            response,
-            "Balance"
+        result = (
+            self._check_response(
+                response,
+                "Balance"
+            )
         )
 
         return float(
@@ -130,26 +179,32 @@ class KrakenClient:
         interval
     ):
 
-        response = self.k.query_public(
-            "OHLC",
-            {
-                "pair": pair,
-                "interval": interval
-            }
+        response = (
+            self.k.query_public(
+                "OHLC",
+                {
+                    "pair": pair,
+                    "interval": interval,
+                }
+            )
         )
 
-        result = self._check_response(
-            response,
-            "OHLC"
+        result = (
+            self._check_response(
+                response,
+                "OHLC"
+            )
         )
 
         data_keys = [
             key
-            for key in result.keys()
+            for key
+            in result.keys()
             if key != "last"
         ]
 
         if not data_keys:
+
             return pd.DataFrame()
 
         raw = result[
@@ -181,21 +236,30 @@ class KrakenClient:
 
         for column in numeric_columns:
 
-            df[column] = pd.to_numeric(
-                df[column],
-                errors="coerce"
+            df[column] = (
+                pd.to_numeric(
+                    df[column],
+                    errors="coerce"
+                )
             )
 
-        df["time"] = pd.to_datetime(
-            df["time"],
-            unit="s",
-            utc=True
+        df["time"] = (
+            pd.to_datetime(
+                df["time"],
+                unit="s",
+                utc=True
+            )
         )
 
-        # Kraken include normalmente anche
-        # la candela ancora aperta.
+        # Kraken include normalmente
+        # anche la candela ancora aperta.
+        # La eliminiamo.
         if len(df) > 1:
-            df = df.iloc[:-1].copy()
+
+            df = (
+                df.iloc[:-1]
+                .copy()
+            )
 
         return df
 
@@ -203,27 +267,37 @@ class KrakenClient:
     # TICKER
     # ========================================================
 
-    def get_ticker(self, pair):
+    def get_ticker(
+        self,
+        pair
+    ):
 
-        response = self.k.query_public(
-            "Ticker",
-            {
-                "pair": pair
-            }
+        response = (
+            self.k.query_public(
+                "Ticker",
+                {
+                    "pair": pair
+                }
+            )
         )
 
-        result = self._check_response(
-            response,
-            "Ticker"
+        result = (
+            self._check_response(
+                response,
+                "Ticker"
+            )
         )
 
         if not result:
+
             raise RuntimeError(
                 "Ticker Kraken non trovato"
             )
 
         key = next(
-            iter(result.keys())
+            iter(
+                result.keys()
+            )
         )
 
         return float(
@@ -234,96 +308,132 @@ class KrakenClient:
     # INFORMAZIONI COPPIA
     # ========================================================
 
-    def get_pair_info(self, pair):
+    def get_pair_info(
+        self,
+        pair
+    ):
 
-        response = self.k.query_public(
-            "AssetPairs",
-            {
-                "pair": pair
-            }
+        response = (
+            self.k.query_public(
+                "AssetPairs",
+                {
+                    "pair": pair
+                }
+            )
         )
 
-        result = self._check_response(
-            response,
-            "AssetPairs"
+        result = (
+            self._check_response(
+                response,
+                "AssetPairs"
+            )
         )
 
         if not result:
+
             raise RuntimeError(
-                f"Coppia Kraken non trovata: {pair}"
+                "Coppia Kraken "
+                f"non trovata: {pair}"
             )
 
-        # Normalmente Kraken restituisce
-        # una sola coppia perché l'abbiamo richiesta.
         pair_key = next(
-            iter(result.keys())
+            iter(
+                result.keys()
+            )
         )
 
-        info = result[pair_key]
+        info = result[
+            pair_key
+        ]
 
         return {
-            "key": pair_key,
-            "altname": info.get(
-                "altname",
-                pair
-            ),
-            "wsname": info.get(
-                "wsname"
-            ),
-            "base": info.get(
-                "base"
-            ),
-            "quote": info.get(
-                "quote"
-            ),
-            "pair_decimals": int(
+            "key":
+                pair_key,
+
+            "altname":
                 info.get(
-                    "pair_decimals",
-                    8
-                )
-            ),
-            "lot_decimals": int(
+                    "altname",
+                    pair
+                ),
+
+            "wsname":
                 info.get(
-                    "lot_decimals",
-                    8
-                )
-            ),
-            "ordermin": float(
+                    "wsname"
+                ),
+
+            "base":
                 info.get(
-                    "ordermin",
-                    0
-                )
-            ),
-            "costmin": float(
+                    "base"
+                ),
+
+            "quote":
                 info.get(
-                    "costmin",
-                    0
-                )
-            ),
-            "tick_size": float(
-                info.get(
-                    "tick_size",
-                    0
-                )
-            ),
+                    "quote"
+                ),
+
+            "pair_decimals":
+                int(
+                    info.get(
+                        "pair_decimals",
+                        8
+                    )
+                ),
+
+            "lot_decimals":
+                int(
+                    info.get(
+                        "lot_decimals",
+                        8
+                    )
+                ),
+
+            "ordermin":
+                float(
+                    info.get(
+                        "ordermin",
+                        0
+                    )
+                ),
+
+            "costmin":
+                float(
+                    info.get(
+                        "costmin",
+                        0
+                    )
+                ),
+
+            "tick_size":
+                float(
+                    info.get(
+                        "tick_size",
+                        0
+                    )
+                ),
+
             "leverage_buy": [
                 float(x)
-                for x in info.get(
+                for x
+                in info.get(
                     "leverage_buy",
                     []
                 )
             ],
+
             "leverage_sell": [
                 float(x)
-                for x in info.get(
+                for x
+                in info.get(
                     "leverage_sell",
                     []
                 )
             ],
-            "status": info.get(
-                "status",
-                "unknown"
-            ),
+
+            "status":
+                info.get(
+                    "status",
+                    "unknown"
+                ),
         }
 
     # ========================================================
@@ -336,27 +446,32 @@ class KrakenClient:
         volume
     ):
 
-        pair_info = self.get_pair_info(
-            pair
+        pair_info = (
+            self.get_pair_info(
+                pair
+            )
         )
 
         decimals = pair_info[
             "lot_decimals"
         ]
 
-        quantum = Decimal(
-            "1"
-        ).scaleb(
-            -decimals
+        quantum = (
+            Decimal("1")
+            .scaleb(
+                -decimals
+            )
         )
 
         value = Decimal(
             str(volume)
         )
 
-        rounded = value.quantize(
-            quantum,
-            rounding=ROUND_DOWN
+        rounded = (
+            value.quantize(
+                quantum,
+                rounding=ROUND_DOWN
+            )
         )
 
         return format(
@@ -374,20 +489,27 @@ class KrakenClient:
         price
     ):
 
-        pair_info = self.get_pair_info(
-            pair
+        pair_info = (
+            self.get_pair_info(
+                pair
+            )
         )
 
-        tick_size = pair_info.get(
-            "tick_size",
-            0
+        tick_size = (
+            pair_info.get(
+                "tick_size",
+                0
+            )
         )
 
         value = Decimal(
             str(price)
         )
 
-        if tick_size and tick_size > 0:
+        if (
+            tick_size
+            and tick_size > 0
+        ):
 
             tick = Decimal(
                 str(tick_size)
@@ -409,19 +531,24 @@ class KrakenClient:
                 "f"
             )
 
-        decimals = pair_info[
-            "pair_decimals"
-        ]
-
-        quantum = Decimal(
-            "1"
-        ).scaleb(
-            -decimals
+        decimals = (
+            pair_info[
+                "pair_decimals"
+            ]
         )
 
-        rounded = value.quantize(
-            quantum,
-            rounding=ROUND_HALF_UP
+        quantum = (
+            Decimal("1")
+            .scaleb(
+                -decimals
+            )
+        )
+
+        rounded = (
+            value.quantize(
+                quantum,
+                rounding=ROUND_HALF_UP
+            )
         )
 
         return format(
@@ -440,8 +567,10 @@ class KrakenClient:
         price
     ):
 
-        info = self.get_pair_info(
-            pair
+        info = (
+            self.get_pair_info(
+                pair
+            )
         )
 
         formatted_volume = (
@@ -469,6 +598,7 @@ class KrakenClient:
         ]
 
         if numeric_volume <= 0:
+
             raise RuntimeError(
                 "Quantità ordine pari a zero "
                 "dopo l'arrotondamento Kraken"
@@ -476,8 +606,10 @@ class KrakenClient:
 
         if (
             ordermin > 0
-            and numeric_volume < ordermin
+            and
+            numeric_volume < ordermin
         ):
+
             raise RuntimeError(
                 f"Quantità {numeric_volume} "
                 f"inferiore al minimo Kraken "
@@ -486,21 +618,35 @@ class KrakenClient:
 
         if (
             costmin > 0
-            and notional < costmin
+            and
+            notional < costmin
         ):
+
             raise RuntimeError(
-                f"Controvalore {notional:.2f} "
-                f"inferiore al minimo Kraken "
+                f"Controvalore "
+                f"{notional:.2f} "
+                "inferiore al minimo Kraken "
                 f"{costmin:.2f}"
             )
 
         return {
-            "allowed": True,
-            "volume": formatted_volume,
-            "notional": notional,
-            "ordermin": ordermin,
-            "costmin": costmin,
-            "pair_info": info,
+            "allowed":
+                True,
+
+            "volume":
+                formatted_volume,
+
+            "notional":
+                notional,
+
+            "ordermin":
+                ordermin,
+
+            "costmin":
+                costmin,
+
+            "pair_info":
+                info,
         }
 
     # ========================================================
@@ -516,19 +662,41 @@ class KrakenClient:
 
         if (
             leverage is None
-            or float(leverage) <= 1
+            or
+            float(leverage) <= 1
         ):
+
             return None
 
-        info = self.get_pair_info(
-            pair
+        side = (
+            str(side)
+            .lower()
         )
 
-        if side.lower() == "buy":
+        if side not in (
+            "buy",
+            "sell",
+        ):
+
+            raise ValueError(
+                "side deve essere "
+                "BUY o SELL"
+            )
+
+        info = (
+            self.get_pair_info(
+                pair
+            )
+        )
+
+        if side == "buy":
+
             available = info[
                 "leverage_buy"
             ]
+
         else:
+
             available = info[
                 "leverage_sell"
             ]
@@ -540,15 +708,15 @@ class KrakenClient:
         if requested not in available:
 
             raise RuntimeError(
-                f"Leva {requested}x non disponibile "
-                f"per {pair} {side}. "
-                f"Leve Kraken disponibili: "
+                f"Leva {requested}x "
+                f"non disponibile per "
+                f"{pair} {side}. "
+                "Leve Kraken disponibili: "
                 f"{available}"
             )
 
-        # Kraken normalmente usa valori
-        # interi per queste coppie.
         if requested.is_integer():
+
             return str(
                 int(requested)
             )
@@ -561,17 +729,23 @@ class KrakenClient:
     # ORDINI APERTI
     # ========================================================
 
-    def get_open_orders(self):
+    def get_open_orders(
+        self
+    ):
 
         self._check_credentials()
 
-        response = self.k.query_private(
-            "OpenOrders"
+        response = (
+            self.k.query_private(
+                "OpenOrders"
+            )
         )
 
-        result = self._check_response(
-            response,
-            "OpenOrders"
+        result = (
+            self._check_response(
+                response,
+                "OpenOrders"
+            )
         )
 
         return result.get(
@@ -583,17 +757,26 @@ class KrakenClient:
     # ORDINI CHIUSI
     # ========================================================
 
-    def get_closed_orders(self):
+    def get_closed_orders(
+        self
+    ):
 
         self._check_credentials()
 
-        response = self.k.query_private(
-            "ClosedOrders"
+        response = (
+            self.k.query_private(
+                "ClosedOrders",
+                {
+                    "trades": True
+                }
+            )
         )
 
-        result = self._check_response(
-            response,
-            "ClosedOrders"
+        result = (
+            self._check_response(
+                response,
+                "ClosedOrders"
+            )
         )
 
         return result.get(
@@ -602,24 +785,144 @@ class KrakenClient:
         )
 
     # ========================================================
+    # CERCA ORDINE TRAMITE CLIENT ORDER ID
+    # ========================================================
+
+    def find_order_by_client_order_id(
+        self,
+        client_order_id
+    ):
+        """
+        Cerca un ordine Kraken utilizzando
+        il cl_ord_id salvato in Firestore.
+
+        Prima controlla gli ordini aperti,
+        poi gli ordini chiusi.
+
+        Ritorna:
+
+        {
+            "txid": "...",
+            "order": {...},
+            "source": "open" oppure "closed"
+        }
+
+        oppure None.
+        """
+
+        if not client_order_id:
+
+            return None
+
+        client_order_id = str(
+            client_order_id
+        )
+
+        # ====================================================
+        # ORDINI APERTI
+        # ====================================================
+
+        open_orders = (
+            self.get_open_orders()
+        )
+
+        for txid, order in (
+            open_orders.items()
+        ):
+
+            order_client_id = str(
+                order.get(
+                    "cl_ord_id",
+                    ""
+                )
+            )
+
+            if (
+                order_client_id
+                == client_order_id
+            ):
+
+                return {
+                    "txid":
+                        txid,
+
+                    "order":
+                        order,
+
+                    "source":
+                        "open",
+                }
+
+        # ====================================================
+        # ORDINI CHIUSI
+        # ====================================================
+
+        closed_orders = (
+            self.get_closed_orders()
+        )
+
+        for txid, order in (
+            closed_orders.items()
+        ):
+
+            order_client_id = str(
+                order.get(
+                    "cl_ord_id",
+                    ""
+                )
+            )
+
+            if (
+                order_client_id
+                == client_order_id
+            ):
+
+                return {
+                    "txid":
+                        txid,
+
+                    "order":
+                        order,
+
+                    "source":
+                        "closed",
+                }
+
+        return None
+
+    # ========================================================
     # DETTAGLIO ORDINE
     # ========================================================
 
-    def get_order_info(self, txid):
+    def get_order_info(
+        self,
+        txid
+    ):
 
         self._check_credentials()
 
-        response = self.k.query_private(
-            "QueryOrders",
-            {
-                "txid": txid,
-                "trades": True
-            }
+        if not txid:
+
+            return {}
+
+        response = (
+            self.k.query_private(
+                "QueryOrders",
+                {
+                    "txid":
+                        txid,
+
+                    "trades":
+                        True,
+                }
+            )
         )
 
-        result = self._check_response(
-            response,
-            "QueryOrders"
+        result = (
+            self._check_response(
+                response,
+                "QueryOrders"
+            )
         )
 
         return result.get(
@@ -631,17 +934,23 @@ class KrakenClient:
     # POSIZIONI APERTE
     # ========================================================
 
-    def get_open_positions(self):
+    def get_open_positions(
+        self
+    ):
 
         self._check_credentials()
 
-        response = self.k.query_private(
-            "OpenPositions"
+        response = (
+            self.k.query_private(
+                "OpenPositions"
+            )
         )
 
-        result = self._check_response(
-            response,
-            "OpenPositions"
+        result = (
+            self._check_response(
+                response,
+                "OpenPositions"
+            )
         )
 
         return result
@@ -662,18 +971,25 @@ class KrakenClient:
 
         self._check_credentials()
 
-        side = side.lower()
+        side = (
+            str(side)
+            .lower()
+        )
 
         if side not in (
             "buy",
             "sell"
         ):
+
             raise ValueError(
-                "side deve essere BUY o SELL"
+                "side deve essere "
+                "BUY o SELL"
             )
 
-        current_price = self.get_ticker(
-            pair
+        current_price = (
+            self.get_ticker(
+                pair
+            )
         )
 
         size_check = (
@@ -685,23 +1001,41 @@ class KrakenClient:
         )
 
         formatted_volume = (
-            size_check["volume"]
+            size_check[
+                "volume"
+            ]
         )
 
         if client_order_id is None:
+
             client_order_id = (
-                self._generate_client_order_id(
+                self.generate_client_order_id(
                     "entry"
                 )
             )
 
+        client_order_id = str(
+            client_order_id
+        )[:18]
+
         data = {
-            "pair": pair,
-            "type": side,
-            "ordertype": "market",
-            "volume": formatted_volume,
-            "cl_ord_id": client_order_id,
-            "validate": bool(validate),
+            "pair":
+                pair,
+
+            "type":
+                side,
+
+            "ordertype":
+                "market",
+
+            "volume":
+                formatted_volume,
+
+            "cl_ord_id":
+                client_order_id,
+
+            "validate":
+                bool(validate),
         }
 
         formatted_leverage = (
@@ -713,32 +1047,51 @@ class KrakenClient:
         )
 
         if formatted_leverage:
+
             data[
                 "leverage"
             ] = formatted_leverage
 
         safe_log = {
-            "pair": pair,
-            "type": side,
-            "ordertype": "market",
-            "volume": formatted_volume,
-            "leverage": formatted_leverage,
-            "validate": bool(validate),
-            "cl_ord_id": client_order_id,
+            "pair":
+                pair,
+
+            "type":
+                side,
+
+            "ordertype":
+                "market",
+
+            "volume":
+                formatted_volume,
+
+            "leverage":
+                formatted_leverage,
+
+            "validate":
+                bool(validate),
+
+            "cl_ord_id":
+                client_order_id,
         }
 
         print(
-            f"Ordine Kraken: {safe_log}"
+            f"Ordine Kraken: "
+            f"{safe_log}"
         )
 
-        response = self.k.query_private(
-            "AddOrder",
-            data
+        response = (
+            self.k.query_private(
+                "AddOrder",
+                data
+            )
         )
 
-        result = self._check_response(
-            response,
-            "AddOrder"
+        result = (
+            self._check_response(
+                response,
+                "AddOrder"
+            )
         )
 
         return result
@@ -762,18 +1115,23 @@ class KrakenClient:
         self._check_credentials()
 
         entry_side = (
-            entry_side.lower()
+            str(entry_side)
+            .lower()
         )
 
         if entry_side == "buy":
+
             exit_side = "sell"
 
         elif entry_side == "sell":
+
             exit_side = "buy"
 
         else:
+
             raise ValueError(
-                "entry_side deve essere BUY o SELL"
+                "entry_side deve essere "
+                "BUY o SELL"
             )
 
         formatted_volume = (
@@ -791,20 +1149,38 @@ class KrakenClient:
         )
 
         if client_order_id is None:
+
             client_order_id = (
-                self._generate_client_order_id(
+                self.generate_client_order_id(
                     "stop"
                 )
             )
 
+        client_order_id = str(
+            client_order_id
+        )[:18]
+
         data = {
-            "pair": pair,
-            "type": exit_side,
-            "ordertype": "stop-loss",
-            "volume": formatted_volume,
-            "price": formatted_price,
-            "cl_ord_id": client_order_id,
-            "validate": bool(validate),
+            "pair":
+                pair,
+
+            "type":
+                exit_side,
+
+            "ordertype":
+                "stop-loss",
+
+            "volume":
+                formatted_volume,
+
+            "price":
+                formatted_price,
+
+            "cl_ord_id":
+                client_order_id,
+
+            "validate":
+                bool(validate),
         }
 
         formatted_leverage = (
@@ -816,28 +1192,63 @@ class KrakenClient:
         )
 
         if formatted_leverage:
+
             data[
                 "leverage"
             ] = formatted_leverage
 
-            if reduce_only:
-                data[
-                    "reduce_only"
-                ] = True
+        if reduce_only:
+
+            data[
+                "reduce_only"
+            ] = True
+
+        safe_log = {
+            "pair":
+                pair,
+
+            "type":
+                exit_side,
+
+            "ordertype":
+                "stop-loss",
+
+            "volume":
+                formatted_volume,
+
+            "price":
+                formatted_price,
+
+            "leverage":
+                formatted_leverage,
+
+            "reduce_only":
+                bool(reduce_only),
+
+            "validate":
+                bool(validate),
+
+            "cl_ord_id":
+                client_order_id,
+        }
 
         print(
             "Invio Stop Loss Kraken: "
-            f"{data}"
+            f"{safe_log}"
         )
 
-        response = self.k.query_private(
-            "AddOrder",
-            data
+        response = (
+            self.k.query_private(
+                "AddOrder",
+                data
+            )
         )
 
-        result = self._check_response(
-            response,
-            "AddOrder Stop Loss"
+        result = (
+            self._check_response(
+                response,
+                "AddOrder Stop Loss"
+            )
         )
 
         return result
@@ -861,18 +1272,23 @@ class KrakenClient:
         self._check_credentials()
 
         entry_side = (
-            entry_side.lower()
+            str(entry_side)
+            .lower()
         )
 
         if entry_side == "buy":
+
             exit_side = "sell"
 
         elif entry_side == "sell":
+
             exit_side = "buy"
 
         else:
+
             raise ValueError(
-                "entry_side deve essere BUY o SELL"
+                "entry_side deve essere "
+                "BUY o SELL"
             )
 
         formatted_volume = (
@@ -890,20 +1306,38 @@ class KrakenClient:
         )
 
         if client_order_id is None:
+
             client_order_id = (
-                self._generate_client_order_id(
+                self.generate_client_order_id(
                     "take_profit"
                 )
             )
 
+        client_order_id = str(
+            client_order_id
+        )[:18]
+
         data = {
-            "pair": pair,
-            "type": exit_side,
-            "ordertype": "take-profit",
-            "volume": formatted_volume,
-            "price": formatted_price,
-            "cl_ord_id": client_order_id,
-            "validate": bool(validate),
+            "pair":
+                pair,
+
+            "type":
+                exit_side,
+
+            "ordertype":
+                "take-profit",
+
+            "volume":
+                formatted_volume,
+
+            "price":
+                formatted_price,
+
+            "cl_ord_id":
+                client_order_id,
+
+            "validate":
+                bool(validate),
         }
 
         formatted_leverage = (
@@ -915,31 +1349,67 @@ class KrakenClient:
         )
 
         if formatted_leverage:
+
             data[
                 "leverage"
             ] = formatted_leverage
 
-            if reduce_only:
-                data[
-                    "reduce_only"
-                ] = True
+        if reduce_only:
+
+            data[
+                "reduce_only"
+            ] = True
+
+        safe_log = {
+            "pair":
+                pair,
+
+            "type":
+                exit_side,
+
+            "ordertype":
+                "take-profit",
+
+            "volume":
+                formatted_volume,
+
+            "price":
+                formatted_price,
+
+            "leverage":
+                formatted_leverage,
+
+            "reduce_only":
+                bool(reduce_only),
+
+            "validate":
+                bool(validate),
+
+            "cl_ord_id":
+                client_order_id,
+        }
 
         print(
             "Invio Take Profit Kraken: "
-            f"{data}"
+            f"{safe_log}"
         )
 
-        response = self.k.query_private(
-            "AddOrder",
-            data
+        response = (
+            self.k.query_private(
+                "AddOrder",
+                data
+            )
         )
 
-        result = self._check_response(
-            response,
-            "AddOrder Take Profit"
+        result = (
+            self._check_response(
+                response,
+                "AddOrder Take Profit"
+            )
         )
 
         return result
+
     # ========================================================
     # CHIUSURA DI EMERGENZA A MERCATO
     # ========================================================
@@ -959,54 +1429,86 @@ class KrakenClient:
         BUY aperto  -> SELL di chiusura
         SELL aperto -> BUY di chiusura
 
-        reduce_only=True impedisce all'ordine
-        di aumentare o invertire la posizione.
+        reduce_only=True impedisce
+        all'ordine di aumentare o
+        invertire la posizione.
         """
 
         self._check_credentials()
 
-        entry_side = entry_side.lower()
+        entry_side = (
+            str(entry_side)
+            .lower()
+        )
 
         if entry_side == "buy":
+
             exit_side = "sell"
 
         elif entry_side == "sell":
+
             exit_side = "buy"
 
         else:
+
             raise ValueError(
-                "entry_side deve essere BUY o SELL"
+                "entry_side deve essere "
+                "BUY o SELL"
             )
 
-        current_price = self.get_ticker(
-            pair
+        current_price = (
+            self.get_ticker(
+                pair
+            )
         )
 
-        size_check = self.validate_order_size(
-            pair=pair,
-            volume=volume,
-            price=current_price
+        size_check = (
+            self.validate_order_size(
+                pair=pair,
+                volume=volume,
+                price=current_price
+            )
         )
 
-        formatted_volume = size_check[
-            "volume"
-        ]
+        formatted_volume = (
+            size_check[
+                "volume"
+            ]
+        )
 
         if client_order_id is None:
+
             client_order_id = (
-                self._generate_client_order_id(
+                self.generate_client_order_id(
                     "emergency"
                 )
             )
 
+        client_order_id = str(
+            client_order_id
+        )[:18]
+
         data = {
-            "pair": pair,
-            "type": exit_side,
-            "ordertype": "market",
-            "volume": formatted_volume,
-            "reduce_only": True,
-            "cl_ord_id": client_order_id,
-            "validate": bool(validate),
+            "pair":
+                pair,
+
+            "type":
+                exit_side,
+
+            "ordertype":
+                "market",
+
+            "volume":
+                formatted_volume,
+
+            "reduce_only":
+                True,
+
+            "cl_ord_id":
+                client_order_id,
+
+            "validate":
+                bool(validate),
         }
 
         formatted_leverage = (
@@ -1018,19 +1520,35 @@ class KrakenClient:
         )
 
         if formatted_leverage:
+
             data[
                 "leverage"
             ] = formatted_leverage
 
         safe_log = {
-            "pair": pair,
-            "type": exit_side,
-            "ordertype": "market",
-            "volume": formatted_volume,
-            "reduce_only": True,
-            "leverage": formatted_leverage,
-            "validate": bool(validate),
-            "cl_ord_id": client_order_id,
+            "pair":
+                pair,
+
+            "type":
+                exit_side,
+
+            "ordertype":
+                "market",
+
+            "volume":
+                formatted_volume,
+
+            "reduce_only":
+                True,
+
+            "leverage":
+                formatted_leverage,
+
+            "validate":
+                bool(validate),
+
+            "cl_ord_id":
+                client_order_id,
         }
 
         print(
@@ -1038,48 +1556,72 @@ class KrakenClient:
             f"{safe_log}"
         )
 
-        response = self.k.query_private(
-            "AddOrder",
-            data
+        response = (
+            self.k.query_private(
+                "AddOrder",
+                data
+            )
         )
 
-        result = self._check_response(
-            response,
-            "Emergency Close"
+        result = (
+            self._check_response(
+                response,
+                "Emergency Close"
+            )
         )
 
         return result
+
     # ========================================================
     # CANCEL ORDER
     # ========================================================
 
-    def cancel_order(self, txid):
+    def cancel_order(
+        self,
+        txid
+    ):
 
         self._check_credentials()
 
-        response = self.k.query_private(
-            "CancelOrder",
-            {
-                "txid": txid
-            }
+        if not txid:
+
+            raise ValueError(
+                "TXID mancante"
+            )
+
+        response = (
+            self.k.query_private(
+                "CancelOrder",
+                {
+                    "txid":
+                        txid
+                }
+            )
         )
 
-        return self._check_response(
-            response,
-            "CancelOrder"
+        return (
+            self._check_response(
+                response,
+                "CancelOrder"
+            )
         )
 
     # ========================================================
     # TEST CONNESSIONE
     # ========================================================
 
-    def test_connection(self):
+    def test_connection(
+        self
+    ):
 
         balance = (
             self.get_account_balance()
         )
 
         return {
-            "connected": True,
-            "balance_eur": balance
+            "connected":
+                True,
+
+            "balance_eur":
+                balance,
         }
