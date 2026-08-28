@@ -246,12 +246,155 @@ def safe_cancel(
 
     except Exception as e:
 
-        # Se è già chiuso/cancellato
-        # non blocchiamo il bot.
         print(
             f"Impossibile cancellare "
             f"{txid}: {e}"
         )
+
+
+# ============================================================
+# CONTROLLO LIMITI DI RISCHIO
+# ============================================================
+
+def check_risk_limits(
+    state,
+    operating_capital,
+):
+
+    risk = state.get_risk_state()
+
+    daily_pnl = float(
+        risk.get(
+            "daily_pnl_eur",
+            0.0
+        )
+    )
+
+    consecutive_losses = int(
+        risk.get(
+            "consecutive_losses",
+            0
+        )
+    )
+
+    already_blocked = bool(
+        risk.get(
+            "trading_blocked",
+            False
+        )
+    )
+
+    block_reason = risk.get(
+        "block_reason"
+    )
+
+    max_daily_loss_eur = (
+        operating_capital
+        * config.MAX_DAILY_LOSS
+    )
+
+    print("\nRISK CONTROL")
+
+    print(
+        f"P&L giornaliero: "
+        f"{daily_pnl:.2f} EUR"
+    )
+
+    print(
+        f"Perdita giornaliera massima: "
+        f"{max_daily_loss_eur:.2f} EUR"
+    )
+
+    print(
+        f"Perdite consecutive: "
+        f"{consecutive_losses}/"
+        f"{config.MAX_CONSECUTIVE_LOSSES}"
+    )
+
+    # --------------------------------------------------------
+    # PERDITA GIORNALIERA
+    # --------------------------------------------------------
+
+    if daily_pnl <= -max_daily_loss_eur:
+
+        reason = (
+            "Limite perdita giornaliera "
+            f"raggiunto: {daily_pnl:.2f} EUR"
+        )
+
+        if not already_blocked:
+
+            state.block_trading(
+                reason
+            )
+
+            send_telegram_message(
+                "🛑 CRYPTO BOT BLOCCATO\n\n"
+                "Limite perdita giornaliera "
+                "raggiunto.\n"
+                f"P&L oggi: {daily_pnl:.2f} EUR\n"
+                f"Limite: -{max_daily_loss_eur:.2f} EUR\n\n"
+                "Nessun nuovo trade fino "
+                "al prossimo giorno."
+            )
+
+        print(
+            f"TRADING BLOCCATO: {reason}"
+        )
+
+        return False
+
+    # --------------------------------------------------------
+    # PERDITE CONSECUTIVE
+    # --------------------------------------------------------
+
+    if (
+        consecutive_losses
+        >= config.MAX_CONSECUTIVE_LOSSES
+    ):
+
+        reason = (
+            f"{consecutive_losses} "
+            "perdite consecutive"
+        )
+
+        if not already_blocked:
+
+            state.block_trading(
+                reason
+            )
+
+            send_telegram_message(
+                "🛑 CRYPTO BOT BLOCCATO\n\n"
+                f"{consecutive_losses} "
+                "trade consecutivi in perdita.\n\n"
+                "Nessun nuovo trade verrà aperto."
+            )
+
+        print(
+            f"TRADING BLOCCATO: {reason}"
+        )
+
+        return False
+
+    # --------------------------------------------------------
+    # BLOCCO PREESISTENTE
+    # --------------------------------------------------------
+
+    if already_blocked:
+
+        print(
+            "TRADING BLOCCATO: "
+            f"{block_reason}"
+        )
+
+        return False
+
+    print(
+        "Risk control: OK"
+    )
+
+    return True
 
 
 # ============================================================
@@ -460,7 +603,6 @@ def monitor_active_trade(
                 "con SL + TP."
             )
 
-            # Telegram apertura
             if not trade.get(
                 "telegram_open_sent"
             ):
@@ -516,8 +658,6 @@ def monitor_active_trade(
                 f"{protection_error}"
             )
 
-            # Cancella eventuali protezioni
-            # create prima dell'errore.
             if stop_txid:
                 safe_cancel(
                     kraken,
@@ -579,9 +719,6 @@ def monitor_active_trade(
                     f"{emergency_error}"
                 )
 
-                # NON marchiamo CLOSED.
-                # In questo modo al prossimo
-                # avvio il bot riproverà.
                 send_telegram_message(
                     "🚨🚨 ATTENZIONE CRITICA\n\n"
                     f"{trade['symbol']} "
@@ -799,149 +936,7 @@ def monitor_active_trade(
 
     return True
 
-# ============================================================
-# CONTROLLO LIMITI DI RISCHIO
-# ============================================================
 
-def check_risk_limits(
-    state,
-    operating_capital,
-):
-
-    risk = state.get_risk_state()
-
-    daily_pnl = float(
-        risk.get(
-            "daily_pnl_eur",
-            0.0
-        )
-    )
-
-    consecutive_losses = int(
-        risk.get(
-            "consecutive_losses",
-            0
-        )
-    )
-
-    already_blocked = bool(
-        risk.get(
-            "trading_blocked",
-            False
-        )
-    )
-
-    block_reason = risk.get(
-        "block_reason"
-    )
-
-    max_daily_loss_eur = (
-        operating_capital
-        * config.MAX_DAILY_LOSS
-    )
-
-    print("\nRISK CONTROL")
-
-    print(
-        f"P&L giornaliero: "
-        f"{daily_pnl:.2f} EUR"
-    )
-
-    print(
-        f"Perdita giornaliera massima: "
-        f"{max_daily_loss_eur:.2f} EUR"
-    )
-
-    print(
-        f"Perdite consecutive: "
-        f"{consecutive_losses}/"
-        f"{config.MAX_CONSECUTIVE_LOSSES}"
-    )
-
-    # --------------------------------------------------------
-    # PERDITA GIORNALIERA
-    # --------------------------------------------------------
-
-    if daily_pnl <= -max_daily_loss_eur:
-
-        reason = (
-            "Limite perdita giornaliera "
-            f"raggiunto: {daily_pnl:.2f} EUR"
-        )
-
-        if not already_blocked:
-
-            state.block_trading(
-                reason
-            )
-
-            send_telegram_message(
-                "🛑 CRYPTO BOT BLOCCATO\n\n"
-                "Limite perdita giornaliera "
-                "raggiunto.\n"
-                f"P&L oggi: {daily_pnl:.2f} EUR\n"
-                f"Limite: -{max_daily_loss_eur:.2f} EUR\n\n"
-                "Nessun nuovo trade fino "
-                "al prossimo giorno."
-            )
-
-        print(
-            f"TRADING BLOCCATO: {reason}"
-        )
-
-        return False
-
-    # --------------------------------------------------------
-    # 3 PERDITE CONSECUTIVE
-    # --------------------------------------------------------
-
-    if (
-        consecutive_losses
-        >= config.MAX_CONSECUTIVE_LOSSES
-    ):
-
-        reason = (
-            f"{consecutive_losses} "
-            "perdite consecutive"
-        )
-
-        if not already_blocked:
-
-            state.block_trading(
-                reason
-            )
-
-            send_telegram_message(
-                "🛑 CRYPTO BOT BLOCCATO\n\n"
-                f"{consecutive_losses} "
-                "trade consecutivi in perdita.\n\n"
-                "Nessun nuovo trade verrà aperto."
-            )
-
-        print(
-            f"TRADING BLOCCATO: {reason}"
-        )
-
-        return False
-
-    # --------------------------------------------------------
-    # BLOCCO GIÀ PRESENTE
-    # --------------------------------------------------------
-
-    if already_blocked:
-
-        print(
-            "TRADING BLOCCATO: "
-            f"{block_reason}"
-        )
-
-        return False
-
-    print(
-        "Risk control: OK"
-    )
-
-    return True
 # ============================================================
 # MAIN
 # ============================================================
@@ -989,9 +984,6 @@ def run():
         )
 
     kraken = KrakenClient()
-
-    # Firestore è necessario
-    # soprattutto in LIVE.
     state = TradeState()
 
     # ========================================================
@@ -1036,7 +1028,7 @@ def run():
     )
 
     # ========================================================
-    # PRIMA CONTROLLA EVENTUALE TRADE REALE
+    # PRIMA CONTROLLA EVENTUALE TRADE ATTIVO
     # ========================================================
 
     try:
@@ -1080,6 +1072,34 @@ def run():
 
         print(
             "=" * 60
+        )
+
+        return
+
+    # ========================================================
+    # LIMITI DI RISCHIO
+    # ========================================================
+
+    try:
+
+        risk_allowed = check_risk_limits(
+            state=state,
+            operating_capital=
+            operating_capital,
+        )
+
+    except Exception as e:
+
+        print(
+            f"ERRORE RISK CONTROL: {e}"
+        )
+
+        return
+
+    if not risk_allowed:
+
+        print(
+            "Nuovi ingressi disabilitati."
         )
 
         return
@@ -1338,7 +1358,7 @@ def run():
         ]
 
         # ====================================================
-        # AI
+        # AI GUARD
         # ====================================================
 
         technical_data = {
@@ -1472,6 +1492,11 @@ def run():
             )
 
             print(
+                f"Rischio teorico: "
+                f"{actual_risk:.2f} EUR"
+            )
+
+            print(
                 "Nessun ordine inviato."
             )
 
@@ -1493,17 +1518,29 @@ def run():
         # Identificativo candela M15
         try:
 
-            signal_candle = (
+            candle_time = (
                 m15.iloc[-1][
                     "time"
-                ].isoformat()
+                ]
             )
+
+            if hasattr(
+                candle_time,
+                "isoformat"
+            ):
+                signal_candle = (
+                    candle_time.isoformat()
+                )
+            else:
+                signal_candle = str(
+                    candle_time
+                )
 
         except Exception:
 
             signal_candle = None
 
-        # Prima salviamo intenzione
+        # Prima salviamo l'intenzione
         # su Firestore.
         state.create_trade(
             symbol=symbol,
@@ -1563,9 +1600,8 @@ def run():
 
             continue
 
-        # Market order normalmente
+        # Il market order normalmente
         # viene eseguito rapidamente.
-        # Aspettiamo brevemente.
         for _ in range(10):
 
             time.sleep(1)
@@ -1579,6 +1615,7 @@ def run():
                 )
 
             except Exception:
+
                 continue
 
             if order_is_filled(
@@ -1608,9 +1645,6 @@ def run():
 
                 break
 
-        # Il prossimo ciclo oppure
-        # questo stesso codice di monitoraggio
-        # costruirà le protezioni.
         trade = (
             state.get_active_trade()
         )
@@ -1623,6 +1657,7 @@ def run():
                 trade,
             )
 
+        # MAX_OPEN_POSITIONS = 1
         break
 
     print(
