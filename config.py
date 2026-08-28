@@ -62,13 +62,9 @@ TIMEFRAMES = {
 # ============================================================
 
 EMA_PERIOD = 200
-
 DONCHIAN_PERIOD = 20
-
 ATR_PERIOD = 14
-
 ADX_PERIOD = 14
-
 RSI_PERIOD = 14
 
 
@@ -79,7 +75,6 @@ RSI_PERIOD = 14
 ADX_MIN = 20
 
 RSI_MAX_LONG = 75
-
 RSI_MIN_SHORT = 25
 
 
@@ -90,11 +85,9 @@ RSI_MIN_SHORT = 25
 CAPITAL_EUR = 150.0
 
 RISK_PER_TRADE = 0.005       # 0.5%
-
 MAX_DAILY_LOSS = 0.02        # 2%
 
 MAX_OPEN_POSITIONS = 1
-
 MAX_CONSECUTIVE_LOSSES = 3
 
 
@@ -103,13 +96,10 @@ MAX_CONSECUTIVE_LOSSES = 3
 # ============================================================
 
 ATR_SL_NORMAL = 2.5
-
 ATR_SL_HIGH_VOL = 3.0
-
 ATR_SL_EXTREME_VOL = 3.5
 
 ATR_HIGH_VOL_RATIO = 1.30
-
 ATR_EXTREME_VOL_RATIO = 1.70
 
 
@@ -124,10 +114,6 @@ RISK_REWARD = 2.0
 # LEVERAGE
 # ============================================================
 
-# ATTENZIONE:
-# la disponibilità effettiva della margin/leverage dipende
-# dalla coppia e dal tipo di conto Kraken.
-
 LEVERAGE_BTC = 2.0
 LEVERAGE_ETH = 1.5
 
@@ -138,8 +124,6 @@ LEVERAGE_ETH = 1.5
 
 REQUEST_TIMEOUT = 20
 
-# Non aprire un nuovo trade se il prezzo è troppo vicino
-# al segnale precedente.
 MIN_SIGNAL_DISTANCE = 0.001
 
 
