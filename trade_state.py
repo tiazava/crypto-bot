@@ -12,14 +12,28 @@ class TradeState:
     def __init__(self):
         self.db = firestore.Client()
 
-    def get_active_trade(self):
-        doc_ref = (
+    def _doc_ref(self):
+        return (
             self.db
             .collection(COLLECTION_NAME)
             .document(DOCUMENT_ID)
         )
 
-        snapshot = doc_ref.get()
+    def _now(self):
+        return datetime.now(
+            timezone.utc
+        ).isoformat()
+
+    # ========================================================
+    # LETTURA STATO
+    # ========================================================
+
+    def get_trade(self):
+
+        snapshot = (
+            self._doc_ref()
+            .get()
+        )
 
         if not snapshot.exists:
             return None
@@ -29,52 +43,287 @@ class TradeState:
         if not data:
             return None
 
-        if data.get("status") != "OPEN":
-            return None
-
         return data
 
-    def save_active_trade(
+    # ========================================================
+    # TRADE ATTIVO
+    # ========================================================
+
+    def get_active_trade(self):
+
+        trade = self.get_trade()
+
+        if not trade:
+            return None
+
+        active_statuses = {
+            "ENTRY_PENDING",
+            "ENTRY_FILLED",
+            "PROTECTION_PENDING",
+            "PROTECTED",
+            "EXIT_PENDING",
+        }
+
+        if trade.get("status") not in active_statuses:
+            return None
+
+        return trade
+
+    # ========================================================
+    # CREAZIONE TRADE
+    # ========================================================
+
+    def create_trade(
         self,
         symbol,
         pair,
         side,
-        entry_price,
-        volume,
+        requested_entry_price,
+        requested_volume,
         stop_loss,
         take_profit,
-        entry_txid,
-        stop_txid,
-        take_profit_txid,
+        leverage,
+        signal_candle=None,
+        entry_client_order_id=None,
     ):
-        now = datetime.now(
-            timezone.utc
-        ).isoformat()
+
+        now = self._now()
 
         data = {
-            "status": "OPEN",
+            "status": "ENTRY_PENDING",
             "symbol": symbol,
             "pair": pair,
-            "side": side,
-            "entry_price": float(entry_price),
-            "volume": float(volume),
-            "stop_loss": float(stop_loss),
-            "take_profit": float(take_profit),
-            "entry_txid": entry_txid,
-            "stop_txid": stop_txid,
-            "take_profit_txid": take_profit_txid,
-            "opened_at": now,
+            "side": side.upper(),
+
+            "requested_entry_price": float(
+                requested_entry_price
+            ),
+
+            "requested_volume": float(
+                requested_volume
+            ),
+
+            "stop_loss": float(
+                stop_loss
+            ),
+
+            "take_profit": float(
+                take_profit
+            ),
+
+            "leverage": float(
+                leverage
+            ),
+
+            "entry_client_order_id":
+                entry_client_order_id,
+
+            "entry_txid": None,
+            "entry_fill_price": None,
+            "entry_filled_volume": None,
+
+            "stop_client_order_id": None,
+            "stop_txid": None,
+
+            "take_profit_client_order_id": None,
+            "take_profit_txid": None,
+
+            "signal_candle":
+                signal_candle,
+
+            "close_reason": None,
+            "exit_price": None,
+            "pnl_eur": None,
+
+            "telegram_open_sent": False,
+            "telegram_close_sent": False,
+
+            "created_at": now,
             "updated_at": now,
         }
 
-        (
-            self.db
-            .collection(COLLECTION_NAME)
-            .document(DOCUMENT_ID)
-            .set(data)
+        self._doc_ref().set(
+            data
         )
 
         return data
+
+    # ========================================================
+    # ENTRY INVIATA
+    # ========================================================
+
+    def set_entry_order(
+        self,
+        txid,
+        client_order_id=None
+    ):
+
+        update = {
+            "entry_txid": txid,
+            "updated_at": self._now(),
+        }
+
+        if client_order_id:
+            update[
+                "entry_client_order_id"
+            ] = client_order_id
+
+        self._doc_ref().update(
+            update
+        )
+
+    # ========================================================
+    # ENTRY ESEGUITA
+    # ========================================================
+
+    def mark_entry_filled(
+        self,
+        fill_price,
+        filled_volume
+    ):
+
+        self._doc_ref().update(
+            {
+                "status": "ENTRY_FILLED",
+
+                "entry_fill_price":
+                    float(fill_price),
+
+                "entry_filled_volume":
+                    float(filled_volume),
+
+                "updated_at":
+                    self._now(),
+            }
+        )
+
+    # ========================================================
+    # PROTEZIONI IN PREPARAZIONE
+    # ========================================================
+
+    def mark_protection_pending(self):
+
+        self._doc_ref().update(
+            {
+                "status":
+                    "PROTECTION_PENDING",
+
+                "updated_at":
+                    self._now(),
+            }
+        )
+
+    # ========================================================
+    # STOP LOSS
+    # ========================================================
+
+    def set_stop_order(
+        self,
+        txid,
+        client_order_id=None
+    ):
+
+        update = {
+            "stop_txid": txid,
+            "updated_at": self._now(),
+        }
+
+        if client_order_id:
+            update[
+                "stop_client_order_id"
+            ] = client_order_id
+
+        self._doc_ref().update(
+            update
+        )
+
+    # ========================================================
+    # TAKE PROFIT
+    # ========================================================
+
+    def set_take_profit_order(
+        self,
+        txid,
+        client_order_id=None
+    ):
+
+        update = {
+            "take_profit_txid": txid,
+            "updated_at": self._now(),
+        }
+
+        if client_order_id:
+            update[
+                "take_profit_client_order_id"
+            ] = client_order_id
+
+        self._doc_ref().update(
+            update
+        )
+
+    # ========================================================
+    # TRADE PROTETTO
+    # ========================================================
+
+    def mark_protected(self):
+
+        trade = self.get_trade()
+
+        if not trade:
+            raise RuntimeError(
+                "Nessun trade Firestore presente"
+            )
+
+        if not trade.get("stop_txid"):
+            raise RuntimeError(
+                "Stop Loss non presente"
+            )
+
+        if not trade.get(
+            "take_profit_txid"
+        ):
+            raise RuntimeError(
+                "Take Profit non presente"
+            )
+
+        self._doc_ref().update(
+            {
+                "status":
+                    "PROTECTED",
+
+                "protected_at":
+                    self._now(),
+
+                "updated_at":
+                    self._now(),
+            }
+        )
+
+    # ========================================================
+    # USCITA IN CORSO
+    # ========================================================
+
+    def mark_exit_pending(
+        self,
+        close_reason
+    ):
+
+        self._doc_ref().update(
+            {
+                "status":
+                    "EXIT_PENDING",
+
+                "close_reason":
+                    close_reason,
+
+                "updated_at":
+                    self._now(),
+            }
+        )
+
+    # ========================================================
+    # CHIUSURA TRADE
+    # ========================================================
 
     def close_trade(
         self,
@@ -82,38 +331,89 @@ class TradeState:
         exit_price=None,
         pnl_eur=None,
     ):
-        now = datetime.now(
-            timezone.utc
-        ).isoformat()
 
-        update_data = {
+        now = self._now()
+
+        update = {
             "status": "CLOSED",
-            "close_reason": close_reason,
-            "closed_at": now,
-            "updated_at": now,
+            "close_reason":
+                close_reason,
+
+            "closed_at":
+                now,
+
+            "updated_at":
+                now,
         }
 
         if exit_price is not None:
-            update_data[
+            update[
                 "exit_price"
             ] = float(exit_price)
 
         if pnl_eur is not None:
-            update_data[
+            update[
                 "pnl_eur"
             ] = float(pnl_eur)
 
-        (
-            self.db
-            .collection(COLLECTION_NAME)
-            .document(DOCUMENT_ID)
-            .update(update_data)
+        self._doc_ref().update(
+            update
         )
 
-    def clear_trade(self):
-        (
-            self.db
-            .collection(COLLECTION_NAME)
-            .document(DOCUMENT_ID)
-            .delete()
+    # ========================================================
+    # TELEGRAM
+    # ========================================================
+
+    def mark_telegram_open_sent(self):
+
+        self._doc_ref().update(
+            {
+                "telegram_open_sent":
+                    True,
+
+                "updated_at":
+                    self._now(),
+            }
         )
+
+    def mark_telegram_close_sent(self):
+
+        self._doc_ref().update(
+            {
+                "telegram_close_sent":
+                    True,
+
+                "updated_at":
+                    self._now(),
+            }
+        )
+
+    # ========================================================
+    # ERRORE
+    # ========================================================
+
+    def mark_error(
+        self,
+        message
+    ):
+
+        self._doc_ref().update(
+            {
+                "status":
+                    "ERROR",
+
+                "error_message":
+                    str(message),
+
+                "updated_at":
+                    self._now(),
+            }
+        )
+
+    # ========================================================
+    # CANCELLAZIONE STATO
+    # ========================================================
+
+    def clear_trade(self):
+
+        self._doc_ref().delete()
