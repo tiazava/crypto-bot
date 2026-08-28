@@ -921,7 +921,115 @@ class KrakenClient:
         )
 
         return result
+    # ========================================================
+    # CHIUSURA DI EMERGENZA A MERCATO
+    # ========================================================
 
+    def close_position_market(
+        self,
+        pair,
+        entry_side,
+        volume,
+        leverage=None,
+        validate=False,
+        client_order_id=None
+    ):
+        """
+        Chiude una posizione esistente a mercato.
+
+        BUY aperto  -> SELL di chiusura
+        SELL aperto -> BUY di chiusura
+
+        reduce_only=True impedisce all'ordine
+        di aumentare o invertire la posizione.
+        """
+
+        self._check_credentials()
+
+        entry_side = entry_side.lower()
+
+        if entry_side == "buy":
+            exit_side = "sell"
+
+        elif entry_side == "sell":
+            exit_side = "buy"
+
+        else:
+            raise ValueError(
+                "entry_side deve essere BUY o SELL"
+            )
+
+        current_price = self.get_ticker(
+            pair
+        )
+
+        size_check = self.validate_order_size(
+            pair=pair,
+            volume=volume,
+            price=current_price
+        )
+
+        formatted_volume = size_check[
+            "volume"
+        ]
+
+        if client_order_id is None:
+            client_order_id = (
+                self._generate_client_order_id(
+                    "emergency"
+                )
+            )
+
+        data = {
+            "pair": pair,
+            "type": exit_side,
+            "ordertype": "market",
+            "volume": formatted_volume,
+            "reduce_only": True,
+            "cl_ord_id": client_order_id,
+            "validate": bool(validate),
+        }
+
+        formatted_leverage = (
+            self.validate_leverage(
+                pair=pair,
+                side=exit_side,
+                leverage=leverage
+            )
+        )
+
+        if formatted_leverage:
+            data[
+                "leverage"
+            ] = formatted_leverage
+
+        safe_log = {
+            "pair": pair,
+            "type": exit_side,
+            "ordertype": "market",
+            "volume": formatted_volume,
+            "reduce_only": True,
+            "leverage": formatted_leverage,
+            "validate": bool(validate),
+            "cl_ord_id": client_order_id,
+        }
+
+        print(
+            "CHIUSURA EMERGENZA KRAKEN: "
+            f"{safe_log}"
+        )
+
+        response = self.k.query_private(
+            "AddOrder",
+            data
+        )
+
+        result = self._check_response(
+            response,
+            "Emergency Close"
+        )
+
+        return result
     # ========================================================
     # CANCEL ORDER
     # ========================================================
