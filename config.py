@@ -181,7 +181,7 @@ MAX_CONSECUTIVE_LOSSES = 3
 
 LEVERAGE_BTC = 2.0
 
-LEVERAGE_ETH = 1.5
+LEVERAGE_ETH = 2.0
 
 
 # ============================================================
